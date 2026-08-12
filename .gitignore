@@ -3,3 +3,5 @@ node_modules/
 .plan-feedback.md
 .DS_Store
 *.log
+
+scratch/
