@@ -142,7 +142,7 @@ export async function startPlanPreviewer(filePath, options = {}) {
 
       setTimeout(() => {
         process.exit(0);
-      }, 500);
+      }, 3500);
 
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
