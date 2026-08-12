@@ -374,7 +374,7 @@ async function submitFeedback(status) {
 
       setTimeout(() => {
         closeTab();
-      }, 600);
+      }, 1600);
     }
   } catch (err) {
     alert('Failed to transmit feedback to agent. Please try again.');
