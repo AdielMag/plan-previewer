@@ -1,0 +1,5 @@
+node_modules/
+.plan-feedback.json
+.plan-feedback.md
+.DS_Store
+*.log

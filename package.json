@@ -1,0 +1,32 @@
+{
+  "name": "plan-previewer",
+  "version": "1.0.0",
+  "description": "Interactive Web Markdown Plan Previewer & Feedback Tool for Claude Code and Antigravity agents",
+  "main": "src/server.js",
+  "type": "module",
+  "bin": {
+    "plan-previewer": "./bin/plan-previewer.js",
+    "install-plan-skills": "./scripts/install-skills.js"
+  },
+  "scripts": {
+    "start": "node ./bin/plan-previewer.js",
+    "install-skills": "node ./scripts/install-skills.js",
+    "postinstall": "node ./scripts/install-skills.js --auto",
+    "test": "node --test tests/detector.test.js"
+  },
+  "keywords": [
+    "claude",
+    "antigravity",
+    "plan-previewer",
+    "markdown-viewer",
+    "agent-skills",
+    "developer-tools"
+  ],
+  "author": "Adiel",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2",
+    "open": "^10.1.0",
+    "picocolors": "^1.0.1"
+  }
+}

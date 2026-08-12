@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plan Previewer</title>
+  
+  <!-- IBM Plex Sans & IBM Plex Mono Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+  
+  <!-- Highlight.js CSS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+  
+  <!-- Marked.js & Highlight.js -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div class="app-layout">
+    
+    <!-- Top Header -->
+    <header class="top-header">
+      <div class="header-agent">
+        <div class="agent-avatar" id="agentAvatar">C</div>
+        <div class="agent-info">
+          <div class="agent-title" id="agentName">Claude Code</div>
+          <div class="agent-mode">Plan mode</div>
+        </div>
+      </div>
+
+      <div class="header-context">
+        <div class="path-line" id="pathLine">workspace · plan.md</div>
+        <div class="goal-title" id="goalTitle">Plan Overview</div>
+      </div>
+
+      <div class="header-right">
+        <button class="btn-close-session" id="btnHeaderClose" title="Close previewer">← Exit</button>
+        <div class="status-pill status-review" id="statusPill">
+          <span class="status-dot"></span>
+          <span id="statusText">Awaiting review</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Area with Document & Right Questions Sidebar -->
+    <div class="workspace-body">
+      
+      <!-- Scrollable Plan Document Center -->
+      <div class="doc-scroll-area" id="docScrollArea">
+        <div class="doc-container">
+          <div class="doc-card">
+            <div class="md-body" id="renderedOutput">
+              <!-- Rendered Markdown Plan -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Questions Sidebar -->
+      <aside class="questions-sidebar">
+        <div class="sidebar-header">
+          <span class="sidebar-title">Questions</span>
+          <span class="sidebar-badge" id="sidebarBadge">0</span>
+        </div>
+        
+        <div class="questions-list" id="questionsList">
+          <div class="empty-sidebar" id="emptySidebar">
+            Select text in the plan to ask the agent a question about it.
+          </div>
+        </div>
+      </aside>
+
+      <!-- Floating Text Selection Popover -->
+      <div class="popover-modal" id="selectionPopover" style="display: none;">
+        <div class="popover-quote" id="popoverQuote">"Selected snippet..."</div>
+        <textarea id="popoverInput" placeholder="Ask a question about this…" rows="2"></textarea>
+        <div class="popover-actions">
+          <button class="popover-btn-cancel" id="btnPopoverCancel">Cancel</button>
+          <button class="popover-btn-ask" id="btnPopoverAsk">Ask →</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Bottom Action Footer -->
+    <footer class="footer-bar">
+      <textarea id="footerComment" placeholder="Overall comments for the agent — changes needed, context, or notes…"></textarea>
+      
+      <button class="footer-btn btn-changes" id="btnRequestChanges">
+        <span>↺ Request changes</span>
+      </button>
+
+      <button class="footer-btn btn-approve" id="btnApprovePlan">
+        <span>✓ Approve plan</span>
+      </button>
+    </footer>
+
+  </div>
+
+  <!-- Transmitted Modal Overlay -->
+  <div class="modal-overlay" id="successModal">
+    <div class="modal-card">
+      <div class="modal-icon">✨</div>
+      <h2 id="modalTitle">Feedback Sent to Agent</h2>
+      <p id="modalMessage">Your edits and comments have been transmitted back to your active agent session.</p>
+      <button class="footer-btn btn-approve" id="btnModalClose">Close Tab</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
