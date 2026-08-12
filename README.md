@@ -3,7 +3,7 @@
 An interactive visual markdown plan previewer and feedback system built for AI coding agents such as Claude Code and Antigravity.
 It provides an automated web interface for previewing rendered markdown plans, live editing plan tasks, making text-selection annotations, appending feedback, and transmitting user approval back to your active agent session.
 
-![Plan Previewer Demo](docs/plan_previewer_demo.gif)
+![Plan Previewer Demo](docs/plan_previewer_demo_v2.gif)
 
 ## Key Features
 
