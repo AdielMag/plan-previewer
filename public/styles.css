@@ -5,6 +5,7 @@ body {
   font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
   overflow: hidden;
   height: 100vh;
+  -webkit-font-smoothing: antialiased;
 }
 
 a {
@@ -24,7 +25,7 @@ a:hover {
 @keyframes popIn {
   from {
     opacity: 0;
-    transform: translateY(4px) scale(.98);
+    transform: translateY(6px) scale(.98);
   }
   to {
     opacity: 1;
@@ -41,12 +42,30 @@ a:hover {
   }
 }
 
-/* App Layout */
+/* Moving Ambient Background Pattern */
+@keyframes ambientMove {
+  0% {
+    background-position: 0% 0%, 0 0, 0 0;
+  }
+  50% {
+    background-position: 100% 100%, 60px 60px, -40px 40px;
+  }
+  100% {
+    background-position: 0% 0%, 0 0, 0 0;
+  }
+}
+
 .app-layout {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: radial-gradient(circle at 50% -10%, #161a20 0%, #0a0c0f 55%);
+  background-color: #0a0c0f;
+  background-image: 
+    radial-gradient(circle at 50% -10%, rgba(35, 55, 80, 0.45) 0%, rgba(10, 12, 15, 0.95) 65%),
+    radial-gradient(circle at 90% 85%, rgba(25, 45, 65, 0.25) 0%, transparent 55%),
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.012) 0, rgba(255, 255, 255, 0.012) 1px, transparent 0, transparent 40px);
+  background-size: 100% 100%, 100% 100%, 80px 80px;
+  animation: ambientMove 40s ease-in-out infinite;
 }
 
 /* Top Header */
@@ -55,23 +74,24 @@ a:hover {
   align-items: center;
   gap: 18px;
   padding: 14px 28px;
-  background: linear-gradient(180deg, #14171d, #12151a);
-  border-bottom: 1px solid rgba(255, 255, 255, .07);
+  background: linear-gradient(180deg, rgba(20, 23, 29, 0.9), rgba(18, 21, 26, 0.9));
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
   flex: none;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, .02);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, .4);
 }
 
 .header-agent {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 12px;
   padding-right: 18px;
   border-right: 1px solid rgba(255, 255, 255, .08);
 }
 
 .agent-avatar {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   border-radius: 10px;
   background: linear-gradient(135deg, oklch(72% 0.13 195), oklch(60% 0.14 250));
   display: flex;
@@ -80,8 +100,8 @@ a:hover {
   color: #0a0c0f;
   font-family: 'IBM Plex Mono', monospace;
   font-weight: 700;
-  font-size: 14px;
-  box-shadow: 0 3px 10px oklch(60% 0.14 250 / 35%);
+  font-size: 15px;
+  box-shadow: 0 3px 12px oklch(60% 0.14 250 / 40%);
 }
 
 .agent-info {
@@ -94,11 +114,14 @@ a:hover {
   font-weight: 600;
   color: #f6f7f8;
   letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .agent-mode {
   font-size: 10.5px;
-  color: rgba(223, 226, 230, .42);
+  color: rgba(223, 226, 230, .45);
   font-family: 'IBM Plex Mono', monospace;
   text-transform: uppercase;
   letter-spacing: .06em;
@@ -113,11 +136,14 @@ a:hover {
 
 .path-line {
   font-size: 11.5px;
-  color: rgba(223, 226, 230, .4);
+  color: rgba(223, 226, 230, .45);
   font-family: 'IBM Plex Mono', monospace;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .goal-title {
@@ -141,18 +167,22 @@ a:hover {
 .btn-close-session {
   background: rgba(255, 255, 255, .06);
   border: 1px solid rgba(255, 255, 255, .1);
-  color: rgba(223, 226, 230, .7);
-  padding: 5px 12px;
+  color: rgba(223, 226, 230, .8);
+  padding: 6px 14px;
   border-radius: 16px;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   transition: all 0.15s ease;
 }
 
 .btn-close-session:hover {
-  background: rgba(255, 255, 255, .12);
-  color: #fff;
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #f87171;
 }
 
 .status-pill {
@@ -209,27 +239,29 @@ a:hover {
 
 .doc-container {
   width: 100%;
-  max-width: 780px;
-  padding: 36px 28px 80px;
+  max-width: 820px;
+  padding: 40px 30px 90px;
   box-sizing: border-box;
 }
 
 .doc-card {
-  background: linear-gradient(180deg, #101317, #0d0f13);
-  border: 1px solid rgba(255, 255, 255, .07);
-  border-radius: 16px;
-  padding: 40px 46px;
-  box-shadow: 0 20px 50px -20px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .03);
+  background: linear-gradient(180deg, rgba(16, 19, 23, 0.95), rgba(13, 15, 19, 0.95));
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 18px;
+  padding: 44px 50px;
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, .7), inset 0 1px 0 rgba(255, 255, 255, .04);
 }
 
 /* Questions Sidebar */
 .questions-sidebar {
-  width: 280px;
+  width: 290px;
   flex: none;
-  border-left: 1px solid rgba(255, 255, 255, .07);
-  background: #0d0f13;
+  border-left: 1px solid rgba(255, 255, 255, .08);
+  background: rgba(13, 15, 19, 0.95);
+  backdrop-filter: blur(8px);
   overflow-y: auto;
-  padding: 18px 15px;
+  padding: 20px 16px;
   display: flex;
   flex-direction: column;
 }
@@ -238,58 +270,64 @@ a:hover {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 4px 14px;
+  margin: 0 4px 16px;
 }
 
 .sidebar-title {
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: .05em;
+  letter-spacing: .06em;
   text-transform: uppercase;
-  color: rgba(223, 226, 230, .4);
+  color: rgba(223, 226, 230, .45);
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .sidebar-badge {
   background: rgba(255, 255, 255, .08);
-  color: rgba(223, 226, 230, .6);
+  color: rgba(223, 226, 230, .7);
   font-size: 10.5px;
   font-weight: 600;
-  padding: 1px 7px;
+  padding: 2px 8px;
   border-radius: 8px;
   font-family: 'IBM Plex Mono', monospace;
 }
 
 .empty-sidebar {
   font-size: 12.5px;
-  color: rgba(223, 226, 230, .3);
-  padding: 6px 4px;
+  color: rgba(223, 226, 230, .35);
+  padding: 12px 8px;
   line-height: 1.7;
+  border: 1px dashed rgba(255, 255, 255, .08);
+  border-radius: 10px;
+  text-align: center;
 }
 
 .question-item-card {
   background: linear-gradient(180deg, #161a20, #131519);
-  border: 1px solid rgba(255, 255, 255, .07);
+  border: 1px solid rgba(255, 255, 255, .08);
   border-radius: 12px;
-  padding: 13px 14px;
-  margin-bottom: 10px;
-  box-shadow: 0 6px 16px -8px rgba(0, 0, 0, .5);
+  padding: 14px 15px;
+  margin-bottom: 12px;
+  box-shadow: 0 8px 20px -8px rgba(0, 0, 0, .6);
   position: relative;
 }
 
 .question-quote {
   font-size: 12px;
-  color: rgba(223, 226, 230, .5);
+  color: rgba(223, 226, 230, .55);
   font-style: italic;
   border-left: 2px solid oklch(80% 0.16 95);
-  padding-left: 9px;
-  margin-bottom: 9px;
+  padding-left: 10px;
+  margin-bottom: 10px;
 }
 
 .question-body-text {
   font-size: 13px;
   color: #e7e9ec;
   line-height: 1.5;
-  margin-bottom: 11px;
+  margin-bottom: 12px;
 }
 
 .question-card-footer {
@@ -305,7 +343,7 @@ a:hover {
   letter-spacing: .02em;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
 }
 
 .question-status-tag .mini-dot {
@@ -323,6 +361,9 @@ a:hover {
   font-size: 11px;
   cursor: pointer;
   text-decoration: underline;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .btn-delete-question:hover {
@@ -332,21 +373,21 @@ a:hover {
 /* Floating Popover */
 .popover-modal {
   position: fixed;
-  width: 310px;
+  width: 320px;
   z-index: 500;
   animation: popIn .14s ease-out;
   background: linear-gradient(180deg, #1b2028, #171b21);
-  border: 1px solid rgba(255, 255, 255, .12);
+  border: 1px solid rgba(255, 255, 255, .14);
   border-radius: 14px;
-  box-shadow: 0 20px 44px rgba(0, 0, 0, .55), 0 0 0 1px oklch(72% 0.13 195 / 15%);
-  padding: 14px;
+  box-shadow: 0 24px 50px rgba(0, 0, 0, .6), 0 0 0 1px oklch(72% 0.13 195 / 18%);
+  padding: 16px;
 }
 
 .popover-quote {
   font-size: 12px;
-  color: rgba(223, 226, 230, .5);
+  color: rgba(223, 226, 230, .55);
   font-style: italic;
-  margin-bottom: 9px;
+  margin-bottom: 10px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -358,26 +399,26 @@ a:hover {
   width: 100%;
   box-sizing: border-box;
   background: #0d0f13;
-  border: 1px solid rgba(255, 255, 255, .1);
+  border: 1px solid rgba(255, 255, 255, .12);
   border-radius: 9px;
   color: #e7e9ec;
   font: 13.5px/1.5 'IBM Plex Sans', sans-serif;
-  padding: 9px 11px;
+  padding: 10px 12px;
   resize: none;
-  height: 58px;
+  height: 60px;
   outline: none;
 }
 
 .popover-modal textarea:focus {
-  border-color: oklch(72% 0.13 195 / 60%);
-  box-shadow: 0 0 0 3px oklch(72% 0.13 195 / 12%);
+  border-color: oklch(72% 0.13 195 / 70%);
+  box-shadow: 0 0 0 3px oklch(72% 0.13 195 / 15%);
 }
 
 .popover-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 12px;
 }
 
 .popover-btn-cancel {
@@ -386,7 +427,7 @@ a:hover {
   color: rgba(223, 226, 230, .5);
   font-size: 12.5px;
   cursor: pointer;
-  padding: 6px 10px;
+  padding: 6px 12px;
 }
 
 .popover-btn-ask {
@@ -396,9 +437,12 @@ a:hover {
   font-size: 12.5px;
   font-weight: 700;
   cursor: pointer;
-  padding: 7px 16px;
+  padding: 7px 18px;
   border-radius: 8px;
-  box-shadow: 0 4px 12px oklch(72% 0.13 195 / 35%);
+  box-shadow: 0 4px 14px oklch(72% 0.13 195 / 35%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* Markdown Rendering (.md-body) */
@@ -410,7 +454,7 @@ a:hover {
 .md-body h1 {
   font-size: 26px;
   font-weight: 600;
-  margin: 0 0 20px;
+  margin: 0 0 22px;
   color: #f6f7f8;
   letter-spacing: -0.015em;
 }
@@ -466,8 +510,8 @@ a:hover {
 
 .md-body li.task-item input {
   margin: 5px 0 0;
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   accent-color: oklch(72% 0.13 195);
 }
 
@@ -573,26 +617,27 @@ a:hover {
 /* Bottom Action Footer Bar */
 .footer-bar {
   flex: none;
-  background: linear-gradient(180deg, #12151a, #101318);
-  border-top: 1px solid rgba(255, 255, 255, .07);
+  background: linear-gradient(180deg, rgba(18, 21, 26, 0.95), rgba(16, 19, 24, 0.95));
+  backdrop-filter: blur(10px);
+  border-top: 1px solid rgba(255, 255, 255, .08);
   padding: 16px 30px;
   display: flex;
   gap: 14px;
   align-items: flex-end;
-  box-shadow: 0 -1px 0 rgba(255, 255, 255, .02);
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, .4);
 }
 
 .footer-bar textarea {
   flex: 1;
   box-sizing: border-box;
   background: #0d0f13;
-  border: 1px solid rgba(255, 255, 255, .09);
+  border: 1px solid rgba(255, 255, 255, .1);
   border-radius: 10px;
   color: #e7e9ec;
   font: 14px/1.5 'IBM Plex Sans', sans-serif;
-  padding: 11px 13px;
+  padding: 11px 14px;
   resize: none;
-  height: 46px;
+  height: 48px;
   outline: none;
   transition: border-color .15s, box-shadow .15s;
 }
@@ -606,12 +651,12 @@ a:hover {
   font-size: 13.5px;
   font-weight: 600;
   cursor: pointer;
-  padding: 12px 20px;
+  padding: 12px 22px;
   border-radius: 10px;
   white-space: nowrap;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   border: none;
   transition: all 0.15s ease;
 }
@@ -631,7 +676,7 @@ a:hover {
   border: none;
   color: #08170a;
   font-weight: 700;
-  box-shadow: 0 5px 16px oklch(68% 0.15 145 / 35%);
+  box-shadow: 0 5px 18px oklch(68% 0.15 145 / 40%);
 }
 
 .btn-approve:hover {
@@ -645,15 +690,15 @@ a:hover {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, .75);
-  backdrop-filter: blur(4px);
+  background: rgba(0, 0, 0, .8);
+  backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.15s ease;
+  transition: opacity 0.18s ease;
 }
 
 .modal-overlay.active {
@@ -663,30 +708,46 @@ a:hover {
 
 .modal-card {
   background: linear-gradient(180deg, #181d24, #14171d);
-  border: 1px solid rgba(255, 255, 255, .12);
-  border-radius: 16px;
-  padding: 30px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 18px;
+  padding: 32px 36px;
   width: 100%;
-  max-width: 420px;
+  max-width: 440px;
   text-align: center;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, .6);
+  box-shadow: 0 28px 70px rgba(0, 0, 0, .7);
+  animation: popIn 0.2s ease-out;
 }
 
-.modal-icon {
-  font-size: 2.8rem;
-  margin-bottom: 12px;
+.modal-icon-badge {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 16px;
+  color: #10b981;
 }
 
 .modal-card h2 {
-  font-size: 1.3rem;
+  font-size: 1.4rem;
   margin-bottom: 8px;
   color: #f6f7f8;
+  font-weight: 600;
 }
 
 .modal-card p {
-  font-size: 0.9rem;
-  color: rgba(223, 226, 230, .6);
-  margin-bottom: 20px;
+  font-size: 0.92rem;
+  color: rgba(223, 226, 230, .65);
+  margin-bottom: 24px;
+  line-height: 1.5;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: center;
 }
 
 ::-webkit-scrollbar {
@@ -695,10 +756,10 @@ a:hover {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, .1);
+  background: rgba(255, 255, 255, .12);
   border-radius: 6px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, .16);
+  background: rgba(255, 255, 255, .2);
 }

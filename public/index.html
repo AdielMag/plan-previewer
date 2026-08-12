@@ -34,12 +34,18 @@
       </div>
 
       <div class="header-context">
-        <div class="path-line" id="pathLine">workspace · plan.md</div>
+        <div class="path-line" id="pathLine">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+          <span>workspace · plan.md</span>
+        </div>
         <div class="goal-title" id="goalTitle">Plan Overview</div>
       </div>
 
       <div class="header-right">
-        <button class="btn-close-session" id="btnHeaderClose" title="Close previewer">← Exit</button>
+        <button class="btn-close-session" id="btnHeaderClose" title="Close previewer">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          <span>Exit</span>
+        </button>
         <div class="status-pill status-review" id="statusPill">
           <span class="status-dot"></span>
           <span id="statusText">Awaiting review</span>
@@ -64,7 +70,10 @@
       <!-- Right Questions Sidebar -->
       <aside class="questions-sidebar">
         <div class="sidebar-header">
-          <span class="sidebar-title">Questions</span>
+          <span class="sidebar-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <span>Questions</span>
+          </span>
           <span class="sidebar-badge" id="sidebarBadge">0</span>
         </div>
         
@@ -81,7 +90,10 @@
         <textarea id="popoverInput" placeholder="Ask a question about this…" rows="2"></textarea>
         <div class="popover-actions">
           <button class="popover-btn-cancel" id="btnPopoverCancel">Cancel</button>
-          <button class="popover-btn-ask" id="btnPopoverAsk">Ask →</button>
+          <button class="popover-btn-ask" id="btnPopoverAsk">
+            <span>Ask</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </button>
         </div>
       </div>
 
@@ -92,11 +104,13 @@
       <textarea id="footerComment" placeholder="Overall comments for the agent — changes needed, context, or notes…"></textarea>
       
       <button class="footer-btn btn-changes" id="btnRequestChanges">
-        <span>↺ Request changes</span>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        <span>Request changes</span>
       </button>
 
       <button class="footer-btn btn-approve" id="btnApprovePlan">
-        <span>✓ Approve plan</span>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        <span>Approve plan</span>
       </button>
     </footer>
 
@@ -105,10 +119,14 @@
   <!-- Transmitted Modal Overlay -->
   <div class="modal-overlay" id="successModal">
     <div class="modal-card">
-      <div class="modal-icon">✨</div>
+      <div class="modal-icon-badge">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
       <h2 id="modalTitle">Feedback Sent to Agent</h2>
       <p id="modalMessage">Your edits and comments have been transmitted back to your active agent session.</p>
-      <button class="footer-btn btn-approve" id="btnModalClose">Close Tab</button>
+      <div class="modal-actions">
+        <button class="footer-btn btn-approve" id="btnModalClose">Close Tab</button>
+      </div>
     </div>
   </div>
 
