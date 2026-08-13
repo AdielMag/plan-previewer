@@ -18,7 +18,8 @@ It allows agents to open rendered markdown plans in a browser interface where us
 - `src/detector.js`: Caller environment detection logic for Claude Code vs Antigravity.
 - `public/`: Frontend static web application featuring modern markdown rendering, editor, and feedback interface.
 - `skills/plan-previewer/SKILL.md`: Skill definition installed into agent directories.
-- `scripts/install-skills.js`: Skill installer prompt script for agent setup.
+- `scripts/install-skills.js`: Skill installer prompt script for agent setup. Also installs the Claude Code enforcement hook.
+- `hooks/require-plan-previewer.mjs`: Claude Code `PreToolUse`/`ExitPlanMode` hook that blocks exiting plan mode unless a fresh, approved `.plan-feedback.json` exists next to the plan file. Copied to `~/.claude/hooks/` and registered in `~/.claude/settings.json` by the installer.
 
 ## Development & Usage Commands
 

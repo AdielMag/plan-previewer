@@ -13,6 +13,7 @@ It provides an automated web interface for previewing rendered markdown plans, l
 - **Realtime Live File Sync**: Uses `fs.watch` and lightweight version polling to update the document, task progress metrics, and rendered markdown live whenever the plan file changes on disk via CLI.
 - **Auto Tab Shutdown**: Automatically closes the browser tab and terminates the server process upon clicking **Approve plan**, **Request changes**, or exiting the viewer.
 - **Ultra Token-Lean Footprint**: Output feedback and agent skill files are optimized (~30 words) to minimize LLM context window consumption.
+- **Enforced, Not Just Documented (Claude Code)**: Installs a `PreToolUse` hook on `ExitPlanMode` that blocks the agent from exiting plan mode unless a fresh, `"approved"` `.plan-feedback.json` exists next to the plan file. This removes the ability for an agent to skip the previewer by reasoning that a particular task "doesn't need it."
 
 ## Installation & Setup
 
@@ -33,6 +34,10 @@ Or re-run skill setup anytime:
 ```bash
 npx plan-previewer install
 ```
+
+### Enforcement Hook (Claude Code)
+
+`plan-previewer install` also copies `hooks/require-plan-previewer.mjs` to `~/.claude/hooks/` and registers it as a `PreToolUse` hook on `ExitPlanMode` in `~/.claude/settings.json` (merged in, existing settings are preserved). Before Claude Code is allowed to leave plan mode, the hook checks the most recently written plan file under `~/.claude/plans/` and denies the call unless `.plan-feedback.json` next to it is newer than the plan and has `status: "approved"`. Re-running `plan-previewer install` is idempotent; it will not duplicate the hook entry.
 
 ## How It Works
 

@@ -20,8 +20,9 @@ npm run install-skills
 
 1. Whenever you write or update a markdown plan file like `plan.md` or `PLAN.md`, run:
    ```bash
-   npx plan-previewer ./plan.md
+   npx plan-previewer ./plan.md --context="Brief task summary"
    ```
 2. The previewer launches an interactive web UI for the user to review, edit, and annotate your plan.
-3. The command will wait for the user to click submit.
-4. Read the generated `.plan-feedback.json` file or terminal stdout to receive user comments, questions, and approval status.
+3. **CRITICAL: STOP AND WAIT.** You MUST stop taking actions or executing tools until `npx plan-previewer` finishes (which occurs when the user clicks Submit in the browser UI or closes the tab).
+4. Read the generated `.plan-feedback.json` (or `.plan-feedback.md`) file to inspect user comments, questions, and approval status before proceeding.
+
