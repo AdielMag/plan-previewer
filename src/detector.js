@@ -3,14 +3,14 @@ import path from 'path';
 import { execSync } from 'child_process';
 
 /**
- * Automatically detects whether the plan-previewer was launched from Claude Code or Antigravity.
+ * Automatically detects or formats the caller agent for plan-previewer.
  * @param {object} options CLI options passed to plan-previewer
  * @returns {object} Caller metadata containing agent ID, display name, icon, and detection reason.
  */
 export function detectCallerAgent(options = {}) {
-  // 1. Explicit CLI argument override flag
-  if (options.agent && (options.agent === 'claude' || options.agent === 'antigravity')) {
-    return createAgentMeta(options.agent, 'CLI argument flag');
+  // 1. Explicit CLI argument override flag (supports any agent name)
+  if (options.agent) {
+    return createAgentMeta(options.agent, `CLI argument flag (--agent=${options.agent})`);
   }
 
   const env = process.env;
@@ -39,7 +39,7 @@ export function detectCallerAgent(options = {}) {
   }
 
   // Default fallback if running in standalone terminal
-  return createAgentMeta('claude', 'Defaulted to Claude Code');
+  return createAgentMeta('agent', 'Generic agent session');
 }
 
 function inspectParentProcessTree() {
@@ -93,8 +93,10 @@ function inspectParentProcessTree() {
   return null;
 }
 
-function createAgentMeta(agentId, reason) {
-  if (agentId === 'antigravity') {
+export function createAgentMeta(agentId, reason) {
+  const id = (agentId || 'agent').toLowerCase().trim();
+
+  if (id === 'antigravity') {
     return {
       id: 'antigravity',
       name: 'Antigravity',
@@ -106,13 +108,39 @@ function createAgentMeta(agentId, reason) {
       reason,
     };
   }
+  if (id === 'claude' || id === 'claude-code') {
+    return {
+      id: 'claude',
+      name: 'Claude Code',
+      subtitle: 'Anthropic AI Agent',
+      badge: 'Claude Code',
+      color: '#D97706',
+      accentColor: '#F59E0B',
+      icon: '🤖',
+      reason,
+    };
+  }
+  if (id === 'gemini') {
+    return {
+      id: 'gemini',
+      name: 'Gemini',
+      subtitle: 'Google AI Agent',
+      badge: 'Gemini',
+      color: '#4285F4',
+      accentColor: '#EA4335',
+      icon: '✨',
+      reason,
+    };
+  }
+
+  const capitalized = id.charAt(0).toUpperCase() + id.slice(1);
   return {
-    id: 'claude',
-    name: 'Claude Code',
-    subtitle: 'Anthropic AI Agent',
-    badge: 'Claude Code',
-    color: '#D97706',
-    accentColor: '#F59E0B',
+    id,
+    name: capitalized,
+    subtitle: 'AI Assistant',
+    badge: capitalized,
+    color: '#3B82F6',
+    accentColor: '#10B981',
     icon: '🤖',
     reason,
   };

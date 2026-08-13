@@ -57,26 +57,32 @@ function deny(reason) {
 }
 
 function findNewestPlanFile(plansDir) {
-  let files;
-  try {
-    files = fs.readdirSync(plansDir).filter((f) => f.endsWith('.md') && !f.startsWith('.'));
-  } catch {
-    return null;
-  }
-
+  const searchDirs = [plansDir, process.cwd()].filter(Boolean);
   let newestPath = null;
   let newestMtime = -Infinity;
-  for (const file of files) {
-    const fullPath = path.join(plansDir, file);
-    let mtime;
+
+  for (const dir of searchDirs) {
+    let files;
     try {
-      mtime = fs.statSync(fullPath).mtimeMs;
+      files = fs.readdirSync(dir).filter((f) => f.endsWith('.md') && !f.startsWith('.'));
     } catch {
       continue;
     }
-    if (mtime > newestMtime) {
-      newestMtime = mtime;
-      newestPath = fullPath;
+
+    for (const file of files) {
+      const fullPath = path.join(dir, file);
+      let mtime;
+      try {
+        const stats = fs.statSync(fullPath);
+        if (!stats.isFile()) continue;
+        mtime = stats.mtimeMs;
+      } catch {
+        continue;
+      }
+      if (mtime > newestMtime) {
+        newestMtime = mtime;
+        newestPath = fullPath;
+      }
     }
   }
   return newestPath;

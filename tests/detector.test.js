@@ -10,6 +10,10 @@ test('detectCallerAgent - explicit CLI argument overrides', () => {
   const antigravityAgent = detectCallerAgent({ agent: 'antigravity' });
   assert.equal(antigravityAgent.id, 'antigravity');
   assert.equal(antigravityAgent.name, 'Antigravity');
+
+  const customAgent = detectCallerAgent({ agent: 'custom' });
+  assert.equal(customAgent.id, 'custom');
+  assert.equal(customAgent.name, 'Custom');
 });
 
 test('detectCallerAgent - environment variable detection', () => {

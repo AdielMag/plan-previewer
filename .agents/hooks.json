@@ -1,0 +1,11 @@
+{
+  "plan-previewer-guard": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "node \"C:/Users/Adiel/plan previewr/scripts/agy-stop-hook.js\"",
+        "timeout": 250
+      }
+    ]
+  }
+}

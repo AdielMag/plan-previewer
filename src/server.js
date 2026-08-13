@@ -1,5 +1,6 @@
 import express from 'express';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import open from 'open';
 import pc from 'picocolors';
@@ -9,49 +10,201 @@ import { detectCallerAgent } from './detector.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export async function startPlanPreviewer(filePath, options = {}) {
-  const absolutePath = path.resolve(process.cwd(), filePath);
+const ACTIVE_SESSION_MARKER = path.join(os.homedir(), '.plan-previewer', 'active-session.json');
 
-  if (!fs.existsSync(absolutePath)) {
-    console.error(pc.red(`Error: Target plan file does not exist at "${absolutePath}"`));
+function writeActiveSessionMarker(planPath, port) {
+  try {
+    fs.mkdirSync(path.dirname(ACTIVE_SESSION_MARKER), { recursive: true });
+    const feedbackJsonPath = path.join(path.dirname(planPath), '.plan-feedback.json');
+    fs.writeFileSync(
+      ACTIVE_SESSION_MARKER,
+      JSON.stringify({ feedbackJsonPath, planFile: planPath, port, pid: process.pid }, null, 2),
+      'utf8'
+    );
+  } catch (e) {}
+}
+
+function clearActiveSessionMarker() {
+  try {
+    if (fs.existsSync(ACTIVE_SESSION_MARKER)) fs.unlinkSync(ACTIVE_SESSION_MARKER);
+  } catch (e) {}
+}
+
+export async function startPlanPreviewer(filePath, options = {}) {
+  let currentPlanPath = path.resolve(process.cwd(), filePath);
+
+  if (!fs.existsSync(currentPlanPath)) {
+    console.error(pc.red(`Error: Target plan file does not exist at "${currentPlanPath}"`));
     process.exit(1);
   }
 
-  const callerAgent = detectCallerAgent(options);
-  const stats = fs.statSync(absolutePath);
+  let callerAgent = detectCallerAgent(options);
+  const stats = fs.statSync(currentPlanPath);
   const createdAt = stats.birthtime && !isNaN(stats.birthtime.getTime()) ? stats.birthtime : stats.mtime;
 
-  const rawInitialContent = fs.readFileSync(absolutePath, 'utf8');
-  const sessionContext = options.context || extractDerivedContext(rawInitialContent, absolutePath);
+  const rawInitialContent = fs.readFileSync(currentPlanPath, 'utf8');
+  let sessionContext = options.context || extractDerivedContext(rawInitialContent, currentPlanPath);
 
   let fileVersion = 1;
+  let selfWriteUntil = 0;
+  let server = null;
+  let activeWatcher = null;
+  const activeSockets = new Set();
+  let pendingFeedbackWaiters = [];
+  let tabOpened = false;
 
-  // File watcher for external edits from CLI or agent tools
-  try {
-    fs.watch(absolutePath, (eventType) => {
-      fileVersion++;
+  function trackSockets(srv) {
+    if (!srv) return;
+    srv.on('connection', (socket) => {
+      activeSockets.add(socket);
+      socket.on('close', () => activeSockets.delete(socket));
     });
-  } catch (err) {
-    // Fallback if fs.watch fails on some file locks
   }
+
+  function writePlanFile(newContent) {
+    selfWriteUntil = Date.now() + 300;
+    fs.writeFileSync(currentPlanPath, newContent, 'utf8');
+  }
+
+  function attachWatcher(targetPath) {
+    if (activeWatcher) {
+      try { activeWatcher.close(); } catch (e) {}
+      activeWatcher = null;
+    }
+    try {
+      activeWatcher = fs.watch(targetPath, () => {
+        if (Date.now() < selfWriteUntil) return;
+        fileVersion++;
+      });
+    } catch (err) {}
+  }
+
+  attachWatcher(currentPlanPath);
 
   const app = express();
   app.use(express.json({ limit: '10mb' }));
 
-  // Serve frontend static assets from public/ directory
   const publicDir = path.join(__dirname, '..', 'public');
   app.use(express.static(publicDir));
 
-  // Heartbeat tracking for automatic shutdown when tab is closed
   let lastHeartbeat = Date.now();
   let clientConnected = false;
+  let exited = false;
+  let pendingShutdownTimer = null;
+
+  function exitOnce(reason) {
+    if (exited) return;
+    exited = true;
+    if (pendingShutdownTimer) clearTimeout(pendingShutdownTimer);
+    clearActiveSessionMarker();
+
+    // Resolve any pending CLI waiters before exiting
+    const waiters = [...pendingFeedbackWaiters];
+    pendingFeedbackWaiters = [];
+    waiters.forEach((waiter) => {
+      clearTimeout(waiter.timer);
+      try { waiter.res.json({ success: true, timeout: true, exit: true }); } catch (e) {}
+    });
+
+    console.log(reason);
+
+    for (const socket of activeSockets) {
+      try { socket.destroy(); } catch (e) {}
+    }
+    activeSockets.clear();
+
+    if (server) {
+      try { server.close(); } catch (e) {}
+    }
+
+    setTimeout(() => {
+      try { fs.closeSync(1); } catch (e) {}
+      try { fs.closeSync(2); } catch (e) {}
+      process.exit(0);
+    }, 200);
+  }
+
+  function scheduleShutdown(reason, delayMs = 1500) {
+    if (exited) return;
+    if (pendingShutdownTimer) clearTimeout(pendingShutdownTimer);
+    pendingShutdownTimer = setTimeout(() => {
+      exitOnce(reason);
+    }, delayMs);
+  }
+
+  function cancelPendingShutdown() {
+    if (pendingShutdownTimer) {
+      clearTimeout(pendingShutdownTimer);
+      pendingShutdownTimer = null;
+    }
+  }
+
+  app.use((req, res, next) => {
+    cancelPendingShutdown();
+    next();
+  });
 
   setInterval(() => {
     if (clientConnected && Date.now() - lastHeartbeat > 7000) {
-      console.log(pc.yellow('\nBrowser window closed. Plan previewer shutting down.'));
-      process.exit(0);
+      exitOnce(pc.yellow('\nBrowser window closed. Plan previewer shutting down.'));
     }
   }, 3000);
+
+  // Status check endpoint for CLI single-instance verification
+  app.get('/api/status', (req, res) => {
+    res.json({
+      success: true,
+      running: true,
+      port: preferredPort,
+      pid: process.pid,
+      planFile: currentPlanPath,
+      sessionContext,
+      callerAgent,
+      fileVersion
+    });
+  });
+
+  // Notify endpoint for CLI callers to update plan file without starting duplicate server
+  app.post('/api/notify', (req, res) => {
+    const { filePath, context, agent, open: shouldOpen } = req.body;
+    if (filePath) {
+      currentPlanPath = path.resolve(process.cwd(), filePath);
+      attachWatcher(currentPlanPath);
+    }
+    if (context) sessionContext = context;
+    if (agent) callerAgent = detectCallerAgent({ agent });
+    fileVersion++;
+    writeActiveSessionMarker(currentPlanPath, preferredPort);
+
+    // Only open a browser tab if this daemon hasn't already served one - a
+    // second CLI invocation reconnecting to an already-running daemon should
+    // never spawn a duplicate tab for the same session.
+    if (shouldOpen !== false && preferredPort && !tabOpened) {
+      tabOpened = true;
+      try { open(`http://localhost:${preferredPort}`); } catch (e) {}
+    }
+
+    res.json({ success: true, fileVersion, planFile: currentPlanPath });
+  });
+
+  // Long-polling feedback wait endpoint for CLI callers
+  app.get('/api/wait-feedback', (req, res) => {
+    // Correlate this waiter to the plan file it was issued for, so an
+    // approval on one plan can never resolve a different plan's pending wait.
+    const planFile = req.query.planFile ? path.resolve(req.query.planFile) : null;
+    const waiter = { res, timer: null, planFile };
+    const timeoutMs = parseInt(req.query.timeout, 10) * 1000 || 240000;
+
+    waiter.timer = setTimeout(() => {
+      const idx = pendingFeedbackWaiters.indexOf(waiter);
+      if (idx !== -1) pendingFeedbackWaiters.splice(idx, 1);
+      try {
+        res.json({ success: true, timeout: true });
+      } catch (e) {}
+    }, timeoutMs);
+
+    pendingFeedbackWaiters.push(waiter);
+  });
 
   app.post('/api/heartbeat', (req, res) => {
     clientConnected = true;
@@ -60,25 +213,22 @@ export async function startPlanPreviewer(filePath, options = {}) {
   });
 
   app.post('/api/shutdown', (req, res) => {
-    res.json({ ok: true, message: 'Server shutting down' });
-    console.log(pc.yellow('\nViewer closed by user. Server shut down cleanly.'));
-    setTimeout(() => process.exit(0), 200);
+    res.json({ ok: true, message: 'Server scheduling shutdown' });
+    scheduleShutdown(pc.yellow('\nViewer closed by user. Server shut down cleanly.'), 1500);
   });
 
-  // GET /api/version - Fast polling for external CLI changes
   app.get('/api/version', (req, res) => {
     res.json({ fileVersion });
   });
 
-  // GET /api/plan - Retrieve plan metadata, session context, and current content
   app.get('/api/plan', (req, res) => {
     try {
-      const content = fs.readFileSync(absolutePath, 'utf8');
-      const currentStats = fs.statSync(absolutePath);
+      const content = fs.readFileSync(currentPlanPath, 'utf8');
+      const currentStats = fs.statSync(currentPlanPath);
       res.json({
         success: true,
-        filename: path.basename(absolutePath),
-        filePath: absolutePath,
+        filename: path.basename(currentPlanPath),
+        filePath: currentPlanPath,
         content,
         fileVersion,
         createdAt: createdAt.toISOString(),
@@ -91,14 +241,13 @@ export async function startPlanPreviewer(filePath, options = {}) {
     }
   });
 
-  // POST /api/plan - Save live edits back to markdown file
   app.post('/api/plan', (req, res) => {
     try {
       const { content } = req.body;
       if (typeof content !== 'string') {
         return res.status(400).json({ success: false, error: 'Invalid content string' });
       }
-      fs.writeFileSync(absolutePath, content, 'utf8');
+      writePlanFile(content);
       fileVersion++;
       res.json({ success: true, fileVersion, updatedAt: new Date().toISOString() });
     } catch (err) {
@@ -106,27 +255,28 @@ export async function startPlanPreviewer(filePath, options = {}) {
     }
   });
 
-  // POST /api/feedback - Process user comments, questions, and approval status
   app.post('/api/feedback', (req, res) => {
     try {
-      const { status, comment, questions, content } = req.body;
+      const { status, comment, questions, choices, content } = req.body;
 
       if (typeof content === 'string') {
-        fs.writeFileSync(absolutePath, content, 'utf8');
+        writePlanFile(content);
+        fileVersion++;
       }
 
       const feedbackData = {
         timestamp: new Date().toISOString(),
-        planFile: absolutePath,
+        planFile: currentPlanPath,
         sessionContext,
         callerAgent: callerAgent.id,
         callerName: callerAgent.name,
         status: status || 'submitted',
         comment: comment || '',
         questions: Array.isArray(questions) ? questions : [],
+        choices: Array.isArray(choices) ? choices : [],
       };
 
-      const dir = path.dirname(absolutePath);
+      const dir = path.dirname(currentPlanPath);
       const feedbackJsonPath = path.join(dir, '.plan-feedback.json');
       fs.writeFileSync(feedbackJsonPath, JSON.stringify(feedbackData, null, 2), 'utf8');
 
@@ -134,15 +284,34 @@ export async function startPlanPreviewer(filePath, options = {}) {
       const mdFeedback = generateFeedbackMarkdown(feedbackData);
       fs.writeFileSync(feedbackMdPath, mdFeedback, 'utf8');
 
-      res.json({ success: true, message: 'Feedback transmitted back to agent successfully' });
+      res.json({ success: true, fileVersion, message: 'Feedback transmitted back to agent successfully' });
 
-      // Ultra token-lean terminal log output for calling agent
+      // Resolve only the CLI waiters that were registered for this plan file -
+      // waiters for a different plan (e.g. reviewed concurrently on the same
+      // daemon) must keep waiting for their own feedback, not this one's.
+      const [matching, remaining] = pendingFeedbackWaiters.reduce(
+        (acc, waiter) => {
+          acc[!waiter.planFile || waiter.planFile === currentPlanPath ? 0 : 1].push(waiter);
+          return acc;
+        },
+        [[], []]
+      );
+      pendingFeedbackWaiters = remaining;
+      matching.forEach((waiter) => {
+        clearTimeout(waiter.timer);
+        try {
+          waiter.res.json({ success: true, timeout: false, feedback: feedbackData });
+        } catch (e) {}
+      });
+
       const qCount = feedbackData.questions.length;
-      console.log(`\n[PLAN-REVIEW]: status=${status.toUpperCase()} | comment="${comment || 'None'}" | questions=${qCount} | saved=.plan-feedback.json\n`);
+      const cCount = feedbackData.choices.length;
+      console.log(`\n[PLAN-REVIEW]: status=${status.toUpperCase()} | comment="${comment || 'None'}" | questions=${qCount} | choices=${cCount} | saved=.plan-feedback.json\n`);
 
-      setTimeout(() => {
-        process.exit(0);
-      }, 3500);
+      // Exit server ONLY when approved. Server stays alive for changes_requested!
+      if (status === 'approved') {
+        scheduleShutdown(pc.green('Plan approved by user. Server shutting down.'), 1500);
+      }
 
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
@@ -150,16 +319,19 @@ export async function startPlanPreviewer(filePath, options = {}) {
   });
 
   const preferredPort = options.port || 3456;
-  const server = app.listen(preferredPort, async () => {
+  server = app.listen(preferredPort, async () => {
+    trackSockets(server);
     const port = server.address().port;
     const url = `http://localhost:${port}`;
-    console.log(pc.bold(pc.cyan('\n🚀 Plan Previewer Active (Live File Sync Enabled)')));
-    console.log(`${pc.bold('Target Plan:')} ${absolutePath}`);
+    console.log(pc.bold(pc.cyan('\n🚀 Plan Previewer Daemon Active')));
+    console.log(`${pc.bold('Target Plan:')} ${currentPlanPath}`);
     console.log(`${pc.bold('Caller Agent:')} ${pc.magenta(callerAgent.name)} (${callerAgent.reason})`);
-    console.log(`${pc.bold('Context:')} ${pc.yellow(sessionContext)}`);
     console.log(`${pc.bold('Viewer URL:')} ${pc.underline(pc.blue(url))}\n`);
 
+    writeActiveSessionMarker(currentPlanPath, port);
+
     if (options.open !== false) {
+      tabOpened = true;
       try {
         await open(url);
       } catch (err) {
@@ -170,11 +342,14 @@ export async function startPlanPreviewer(filePath, options = {}) {
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
-      const dynamicServer = app.listen(0, async () => {
-        const dynamicPort = dynamicServer.address().port;
+      server = app.listen(0, async () => {
+        trackSockets(server);
+        const dynamicPort = server.address().port;
         const url = `http://localhost:${dynamicPort}`;
-        console.log(pc.bold(pc.cyan(`\n🚀 Plan Previewer Active on port ${dynamicPort}`)));
+        console.log(pc.bold(pc.cyan(`\n🚀 Plan Previewer Daemon Active on port ${dynamicPort}`)));
+        writeActiveSessionMarker(currentPlanPath, dynamicPort);
         if (options.open !== false) {
+          tabOpened = true;
           await open(url);
         }
       });
@@ -204,26 +379,24 @@ function generateFeedbackMarkdown(data) {
     md += `## User Feedback & Comments\n\n${data.comment}\n\n`;
   }
 
+  if (data.choices && data.choices.length > 0) {
+    md += `## Design Choices & Selected Options\n\n`;
+    data.choices.forEach((c, i) => {
+      md += `### ${i + 1}. ${c.title || 'Choice'}\n`;
+      if (c.selected) md += `- **Selected Option:** ${c.selected}\n`;
+      if (c.answer) md += `- **User Answer:** ${c.answer}\n`;
+      md += `\n`;
+    });
+  }
+
   if (data.questions && data.questions.length > 0) {
-    md += `## Questions & Section Annotations\n\n`;
+    md += `## Inline Questions & Context\n\n`;
     data.questions.forEach((q, i) => {
-      md += `### ${i + 1}. ${q.section || 'General Note'}\n`;
-      md += `${q.text}\n\n`;
+      md += `### Question ${i + 1}\n`;
+      if (q.section) md += `> *Quote:* "${q.section}"\n\n`;
+      md += `**Question:** ${q.text}\n\n`;
     });
   }
 
   return md;
-}
-
-function formatStatusPill(status) {
-  switch (status) {
-    case 'approved':
-      return pc.bgGreen(pc.black(' APPROVED '));
-    case 'changes_requested':
-      return pc.bgRed(pc.white(' CHANGES REQUESTED '));
-    case 'questions_asked':
-      return pc.bgYellow(pc.black(' QUESTIONS ASKED '));
-    default:
-      return pc.bgBlue(pc.white(' SUBMITTED '));
-  }
 }
