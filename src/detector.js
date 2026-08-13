@@ -54,7 +54,10 @@ function inspectParentProcessTree() {
 
       if (process.platform === 'win32') {
         const psCmd = `powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter 'ProcessId = ${currentPid}' | Format-List Name, CommandLine, ParentProcessId"`;
-        const out = execSync(psCmd, { encoding: 'utf8', timeout: 3000 });
+        // windowsHide is required here - without it, execSync flashes a
+        // visible console window for every level walked (cmd.exe + the
+        // powershell.exe it spawns), once per parent in the chain.
+        const out = execSync(psCmd, { encoding: 'utf8', timeout: 3000, windowsHide: true });
         const nameMatch = out.match(/Name\s+:\s+(.+)/i);
         const cmdMatch = out.match(/CommandLine\s+:\s+(.+)/i);
         const ppidMatch = out.match(/ParentProcessId\s+:\s+(\d+)/i);

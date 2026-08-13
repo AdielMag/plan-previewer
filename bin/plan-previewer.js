@@ -178,6 +178,10 @@ function spawnDetachedServer(filePath, options) {
     detached: true,
     stdio: 'ignore',
     cwd: process.cwd(),
+    // Without this, Windows pops a visible console window for the detached
+    // child even though stdio is ignored - and each spawn (including ones
+    // the spawn lock now prevents from racing) flashed one open.
+    windowsHide: true,
   });
   child.unref();
 }

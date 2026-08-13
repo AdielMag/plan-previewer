@@ -5,10 +5,27 @@ import path from 'path';
 import open from 'open';
 import pc from 'picocolors';
 import { fileURLToPath } from 'url';
+import { spawn } from 'child_process';
 import { detectCallerAgent } from './detector.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// The `open` package launches the browser on Windows via a PowerShell
+// -EncodedCommand invocation that does not honor windowsHide, flashing a
+// visible console window every time. Launch it ourselves via `cmd /c start`
+// with windowsHide instead, so the tab opens without any console flash.
+async function openBrowser(url) {
+  if (process.platform === 'win32') {
+    spawn('cmd', ['/c', 'start', '""', url], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    }).unref();
+    return;
+  }
+  return open(url);
+}
 
 const ACTIVE_SESSION_MARKER = path.join(os.homedir(), '.plan-previewer', 'active-session.json');
 
@@ -181,7 +198,7 @@ export async function startPlanPreviewer(filePath, options = {}) {
     // never spawn a duplicate tab for the same session.
     if (shouldOpen !== false && preferredPort && !tabOpened) {
       tabOpened = true;
-      try { open(`http://localhost:${preferredPort}`); } catch (e) {}
+      try { openBrowser(`http://localhost:${preferredPort}`); } catch (e) {}
     }
 
     res.json({ success: true, fileVersion, planFile: currentPlanPath });
@@ -333,7 +350,7 @@ export async function startPlanPreviewer(filePath, options = {}) {
     if (options.open !== false) {
       tabOpened = true;
       try {
-        await open(url);
+        await openBrowser(url);
       } catch (err) {
         console.log(pc.yellow(`Please open ${url} in your browser.`));
       }
@@ -350,7 +367,7 @@ export async function startPlanPreviewer(filePath, options = {}) {
         writeActiveSessionMarker(currentPlanPath, dynamicPort);
         if (options.open !== false) {
           tabOpened = true;
-          await open(url);
+          await openBrowser(url);
         }
       });
     } else {
