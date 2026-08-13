@@ -47,21 +47,25 @@ description: MANDATORY. Execute whenever creating or updating plan markdown file
 
 Whenever writing or updating a markdown plan file (e.g. \`plan.md\`, \`PLAN.md\`), you MUST follow this protocol:
 
-1. **Launch Previewer:**
-   Run the previewer in terminal:
+0. **Apply the \`rich-plan-formatting\` skill to the plan content first.** Before launching the previewer, structure the plan with its choice/question blocks, alert callouts, and status badges - Plan Previewer renders these specially, and a plain, unformatted plan defeats the point of reviewing it in this viewer.
+
+1. **Launch Previewer as a plain, blocking foreground command:**
    \`\`\`bash
    npx plan-previewer ./plan.md${agentFlag} --context="Brief task summary"
    \`\`\`
+   - On **Claude Code**: The command runs synchronously in foreground and blocks until the user submits feedback.
+   - On **Antigravity AGY**: If \`run_command\` sends the process to a background task, simply stop calling tools to end your turn. The installed \`Stop\` hook intercepts the execution loop's termination and automatically resumes your session with the result the instant the user submits feedback in the web UI - no extra tool call is needed.
 
-2. **CRITICAL: STOP & WAIT FOR USER INPUT**
-   - Do NOT execute any subsequent steps or tool calls.
-   - Do NOT edit code or run further bash commands.
-   - You MUST wait synchronously for \`npx plan-previewer\` to finish executing (which occurs when the user clicks Submit in the browser UI or closes the tab).
+2. **CRITICAL: STOP & WAIT FOR THE COMMAND TO EXIT**
+   - Do NOT execute any subsequent plan steps or tool calls while it is running.
+   - Do NOT edit project code or run further bash commands.
+   - The command exits on its own either when the user submits feedback (Request Changes or Approve) in the browser tab, **or** after a bounded wait (~4 minutes by default) with no decision yet — this second case is normal, not an error or a signal to give up. It exists because some agent harnesses cap how long a single command may run, shorter than a human typically takes to review a plan.
 
-3. **Inspect Feedback Before Proceeding**
-   - Once the command exits, inspect \`.plan-feedback.json\` (or \`.plan-feedback.md\`), written next to the plan file, not necessarily your terminal's working directory.
-   - If \`status\` is \`"approved"\`, proceed with executing the plan.
-   - If \`status\` is \`"changes_requested"\` or \`"questions_asked"\`, address user comments/questions, update the plan file, re-run \`npx plan-previewer\`, and wait again.
+3. **Inspect Feedback & Act**
+   - Once the command exits, check \`.plan-feedback.json\` (or \`.plan-feedback.md\`) next to the plan file.
+   - If it doesn't exist yet, or its \`status\` is the same one you already handled in a previous round (nothing new since your last check): the user simply hasn't responded yet. **Just re-run the exact same command again** and keep waiting — repeat as many times as it takes.
+   - If \`status\` is \`"approved"\`, DO NOT wait for another user prompt—immediately begin executing the plan steps.
+   - If \`status\` is \`"changes_requested"\` or \`"questions_asked"\` **and you haven't already addressed it**, address user comments/questions, update the plan file, then re-run the exact same command (same plan file, default port). The already-open browser tab detects the server coming back and shows your update in place automatically.
 
 4. **This is enforced, not optional, on Claude Code.** A \`PreToolUse\` hook on \`ExitPlanMode\`, installed alongside this skill, blocks exiting plan mode unless a fresh, \`"approved"\` \`.plan-feedback.json\` exists next to the plan file. Do not reason your way past steps 1-3.
 `;
@@ -72,11 +76,14 @@ const MANDATORY_RULE_BLOCK = `
 
 Whenever you write, update, or propose an execution plan or plan markdown file (such as \`./plan.md\`, \`PLAN.md\`, or temporary plan files), you MUST follow this protocol:
 
-1. Run \`npx plan-previewer <path-to-plan> --context="<task summary>"\` in terminal.
-2. **CRITICAL: STOP AND WAIT.** Do NOT execute plan steps, edit files, or make further tool calls until the user submits feedback in the web UI and the command finishes.
+0. Apply the \`rich-plan-formatting\` skill to the plan content first - structure it with choice/question blocks, alert callouts, and status badges before launching the previewer.
+1. Run \`npx plan-previewer <path-to-plan> --context="<task summary>"\` in terminal as a plain command.
+   - On **Antigravity AGY**: If \`run_command\` sends the command to a background task, simply stop calling tools to end your turn. The installed \`Stop\` hook intercepts the execution loop's termination and automatically resumes the session with the result the instant feedback is submitted - no extra tool call is needed.
+2. **CRITICAL: STOP AND WAIT FOR IT TO EXIT.** Do NOT execute plan steps, edit files, or make further tool calls until the command finishes. It exits either when the user submits feedback in the web UI, or after a bounded wait (~4 minutes by default) with no decision yet — that second case is normal, not an error, since some harnesses cap how long a single command may run.
 3. Read \`.plan-feedback.json\` (or \`.plan-feedback.md\`), written next to the plan file, to inspect the user's comments, questions, and approval status.
-4. If \`status\` is \`'approved'\`, proceed with execution. If \`status\` is \`'changes_requested'\` or \`'questions_asked'\`, update the plan, re-run \`npx plan-previewer\`, and wait again.
-5. On Claude Code, this is enforced by a \`PreToolUse\` hook on \`ExitPlanMode\` (\`~/.claude/hooks/require-plan-previewer.mjs\`). Exiting plan mode is blocked unless step 3's feedback file is fresh and \`"approved"\`. Do not attempt to bypass it; fix the underlying gap instead.
+4. If the file doesn't exist yet, or its \`status\` is the same one you already handled in a previous round: the user hasn't responded yet - just re-run the exact same command again and keep waiting, as many times as it takes.
+5. If \`status\` is \`'approved'\`, immediately proceed with plan execution. If \`status\` is \`'changes_requested'\` or \`'questions_asked'\` and you haven't already addressed it, update the plan, then re-run the exact same command (same plan file, default port) and wait again — the already-open browser tab reconnects and shows the update automatically.
+6. On Claude Code, this is enforced by a \`PreToolUse\` hook on \`ExitPlanMode\` (\`~/.claude/hooks/require-plan-previewer.mjs\`). Exiting plan mode is blocked unless step 3's feedback file is fresh and \`"approved"\`. Do not attempt to bypass it; fix the underlying gap instead.
 `;
 
 async function promptUser(question) {
@@ -98,7 +105,16 @@ function installSkillToPath(targetDir, name, agentId) {
     const targetFile = path.join(targetDir, 'SKILL.md');
     const content = generateSkillContent(agentId);
     fs.writeFileSync(targetFile, content, 'utf8');
-    console.log(` ${pc.green('✔')} Installed skill to ${pc.bold(name)} -> ${pc.gray(targetFile)}`);
+
+    // Also install rich-plan-formatting skill in sibling directory
+    const richSkillDir = path.join(path.dirname(targetDir), 'rich-plan-formatting');
+    fs.mkdirSync(richSkillDir, { recursive: true });
+    const richSource = path.join(__dirname, '..', 'skills', 'rich-plan-formatting', 'SKILL.md');
+    if (fs.existsSync(richSource)) {
+      fs.copyFileSync(richSource, path.join(richSkillDir, 'SKILL.md'));
+    }
+
+    console.log(` ${pc.green('✔')} Installed skills to ${pc.bold(name)} -> ${pc.gray(targetFile)}`);
     return true;
   } catch (err) {
     console.error(` ${pc.red('✖')} Failed to install to ${name}: ${err.message}`);
@@ -203,6 +219,48 @@ function ensureRuleInFile(filePath, label) {
   }
 }
 
+function installAgyHook() {
+  const targetPaths = [
+    // Global Customizations Root - applies regardless of which workspace is open.
+    path.join(getHomeDir(), '.gemini', 'config', 'hooks.json'),
+    // Workspace Customizations Root for whichever project the installer is run from.
+    path.join(process.cwd(), '.agents', 'hooks.json'),
+  ];
+
+  const scriptPath = path.resolve(__dirname, 'agy-stop-hook.js').replace(/\\/g, '/');
+
+  for (const agyHooksPath of targetPaths) {
+    try {
+      const dir = path.dirname(agyHooksPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      let agyHooks = {};
+      if (fs.existsSync(agyHooksPath)) {
+        try {
+          agyHooks = JSON.parse(fs.readFileSync(agyHooksPath, 'utf8'));
+        } catch (e) {}
+      }
+
+      agyHooks['plan-previewer-guard'] = {
+        Stop: [
+          {
+            type: 'command',
+            command: `node "${scriptPath}"`,
+            timeout: 250,
+          },
+        ],
+      };
+
+      fs.writeFileSync(agyHooksPath, JSON.stringify(agyHooks, null, 2), 'utf8');
+      console.log(` ${pc.green('✔')} Installed AGY Stop hook -> ${pc.gray(agyHooksPath)}`);
+    } catch (err) {
+      console.error(` ${pc.yellow('⚠')} Could not install AGY Stop hook at ${agyHooksPath}: ${err.message}`);
+    }
+  }
+}
+
 async function main() {
   const isAuto = process.argv.includes('--auto') || !process.stdin.isTTY;
 
@@ -236,12 +294,13 @@ async function main() {
   console.log(pc.bold('\nConfiguring mandatory agent rules:'));
   updateAgentRuleFiles();
 
-  console.log(pc.bold('\nInstalling enforcement hook (Claude Code):'));
+  console.log(pc.bold('\nInstalling enforcement hooks (Claude Code & Antigravity):'));
   installEnforcementHook();
+  installAgyHook();
 
   console.log(
     pc.bold(
-      pc.green(`\nSuccessfully configured ${installedCount} agent skill environments and agent rules!`)
+      pc.green(`\nSuccessfully configured ${installedCount} agent skill environments and agent hooks!`)
     )
   );
 }
