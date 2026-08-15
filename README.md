@@ -1,19 +1,33 @@
 # Plan Previewer
 
 An interactive visual markdown plan previewer and feedback system built for AI coding agents such as Claude Code, Antigravity, and Pi CLI.
-It provides an automated web interface for previewing rendered markdown plans, live editing plan tasks, making text-selection annotations, appending feedback, and transmitting user approval back to your active agent session.
+It provides an automated web interface for previewing rendered markdown plans, selecting design choices, making inline text annotations, tracking real-time activity, reviewing agent change summaries, and transmitting user approval back to your active agent session.
 
 ![Plan Previewer Demo](docs/plan_previewer_demo_v3.gif)
 
 ## Key Features
 
-- **Multi-Agent Auto-Detection**: Automatically detects whether the session was opened by Claude Code, Antigravity, or Pi CLI - first from agent-specific environment variables (`CLAUDE_*`, `ANTIGRAVITY_*`/`AGY_*`, `PI_*`), then by inspecting parent process trees (`process.ppid`) - without needing manual selection. Pi CLI is identified by its host `PI_*` variables, so a Pi session running an Anthropic model is still reported as Pi CLI, not Claude Code.
-- **Claude Design Handoff Aesthetic**: Built using the dark canvas aesthetic with IBM Plex typography, OKLCH teal accents, and inline highlight badges.
-- **Text Selection Annotations**: Highlight text anywhere in the plan preview to open a floating question popover (`"Quote snippet..."`, input box, `Cancel`, and `Ask →`).
-- **Realtime Live File Sync**: Uses `fs.watch` and lightweight version polling to update the document, task progress metrics, and rendered markdown live whenever the plan file changes on disk via CLI.
-- **Auto Tab Shutdown**: Automatically closes the browser tab and terminates the server process upon clicking **Approve plan**, **Request changes**, or exiting the viewer.
-- **Ultra Token-Lean Footprint**: Output feedback and agent skill files are optimized (~30 words) to minimize LLM context window consumption.
-- **Enforced, Not Just Documented (Claude Code)**: Installs a `PreToolUse` hook on `ExitPlanMode` that blocks the agent from exiting plan mode unless a fresh, `"approved"` `.plan-feedback.json` exists next to the plan file. This removes the ability for an agent to skip the previewer by reasoning that a particular task "doesn't need it."
+- **Multi-Agent Auto-Detection & Branding**: Automatically detects whether the session was opened by Claude Code, Antigravity, or Pi CLI - first from agent-specific environment variables (`CLAUDE_*`, `ANTIGRAVITY_*`/`AGY_*`, `PI_*`), then by inspecting parent process trees (`process.ppid`). Displays custom avatars, π symbols, and brand gradients (purple/cyan for Pi, amber for Claude, blue/green for Antigravity).
+- **Interactive Choice Cards & Open Questions**: Formats `[!CHOICE]` and `[!QUESTION]` blocks into interactive UI cards with radio options, `[Recommended]` badge parsing, Answered/Unanswered chips, and explicit **Clear** controls.
+- **Agent Change Summaries & Changelogs**: When an agent addresses requested changes, it can supply an authored explanation of what was changed via `--response="..."` or `.plan-response.md`. The web UI renders this explanation as the primary response bubble in the activity feed alongside line diff statistics (+N / −M lines).
+- **Responsive Layout & Width Switcher**:
+  - **Narrow (Comfortable)**: 820px centered reading column.
+  - **Wide (75% / 1160px)**: Default sweet spot for plans with tables, code blocks, and diagrams.
+  - **Full Width**: 100% fluid edge-to-edge layout stretching across the screen.
+  - **Collapsible Sidebars**: Toggle buttons to collapse the Outline (TOC) and Activity sidebars.
+- **Live Activity Tracking with Category Colors**:
+  - Real-time reactivity: selecting an option or typing an answer immediately updates the Activity sidebar.
+  - Distinct color badges:
+    - **Violet (`#8b5cf6`)**: Design choice selections.
+    - **Amber (`#f59e0b`)**: Highlighted text snippet notes.
+    - **Cyan (`#0ea5e9`)**: Open question answers.
+  - **Click-to-Scroll**: Clicking any activity badge smoothly scrolls to and flashes the corresponding card in the document.
+- **Floating Text Selection Annotations**: Highlight text anywhere in the plan preview to open an elevated popover card for leaving notes or asking questions directly on that snippet.
+- **Action Button States**: The **Request changes** button stays disabled until an activity (choice selection, comment, question answer, or text note) is made, preventing accidental empty submissions.
+- **Realtime Live File Sync & Fallback Parsing**: Uses file watching and polling to update the document live. Includes a built-in local markdown parser and `localStorage` caching so the plan renders reliably without external CDN dependencies.
+- **Enforced, Not Just Documented**:
+  - **Claude Code**: Installs a `PreToolUse` hook on `ExitPlanMode` that blocks exiting plan mode without fresh `"approved"` feedback.
+  - **Pi CLI**: Installs an enhanced `plan-mode` extension that permits path-gated writes for plan artifacts (`plan.md`, `task_plan.md`, `*-plan.md`, `.plan-response.md`) while protecting source code, plus the `questionnaire` tool extension.
 
 ## Installation & Setup
 
@@ -23,7 +37,7 @@ Install globally via npm:
 npm install -g plan-previewer
 ```
 
-Register skills and mandatory agent rules across Claude Code, Antigravity, and Pi CLI:
+Register skills, extensions, and mandatory agent rules across Claude Code, Antigravity, and Pi CLI:
 
 ```bash
 plan-previewer install --auto
@@ -35,17 +49,22 @@ Or re-run skill setup anytime:
 npx plan-previewer install
 ```
 
-### Enforcement Hook (Claude Code)
+### Agent Integrations
 
-`plan-previewer install` also copies `hooks/require-plan-previewer.mjs` to `~/.claude/hooks/` and registers it as a `PreToolUse` hook on `ExitPlanMode` in `~/.claude/settings.json` (merged in, existing settings are preserved). Before Claude Code is allowed to leave plan mode, the hook checks the most recently written plan file under `~/.claude/plans/` and denies the call unless `.plan-feedback.json` next to it is newer than the plan and has `status: "approved"`. Re-running `plan-previewer install` is idempotent; it will not duplicate the hook entry.
+#### Claude Code
+`plan-previewer install` registers the `PreToolUse` hook on `ExitPlanMode` in `~/.claude/settings.json` and copies `hooks/require-plan-previewer.mjs` to `~/.claude/hooks/`. Claude Code is prevented from exiting plan mode until `.plan-feedback.json` contains `status: "approved"`.
 
-### Pi CLI
+#### Antigravity (AGY CLI)
+Registers the `Stop` hook in `~/.gemini/config/hooks.json` to intercept background task completion and automatically resume the agent session when feedback is submitted.
 
-`plan-previewer install` writes the skill to `~/.pi/agent/skills/plan-previewer/SKILL.md` (alongside `rich-plan-formatting`) and appends the mandatory execution rule to Pi's global context file at `~/.pi/agent/AGENTS.md`. The skill is also installed to `~/.agents/skills/`, which Pi loads as well.
+#### Pi CLI
+Installs:
+1. Linked skills to `~/.pi/agent/skills/` (avoiding name collisions with `~/.agents/skills/`).
+2. Global mandatory rules block to `~/.pi/agent/AGENTS.md` (with automatic backup of legacy rules).
+3. Enhanced `plan-mode` extension to `~/.pi/agent/extensions/plan-mode/` enabling plan artifact authoring during plan mode while strictly protecting source code.
+4. `questionnaire` tool extension to `~/.pi/agent/extensions/questionnaire.ts`.
 
-Pi CLI needs no enforcement hook or stop hook: its `bash` tool runs commands synchronously in the foreground, so `npx plan-previewer ./plan.md` simply blocks the agent's turn until the user approves or requests changes in the browser - the same flow as Claude Code.
-
-Pi's `bash` tool also applies **no timeout** when the agent omits one, so an unbounded wait would freeze the turn until manually aborted. Under Pi, the CLI therefore defaults `--wait-timeout` to **240 seconds** and relies on the documented "re-run the same command" loop; the detached server and the open browser tab both survive between runs, so the review picks up exactly where it left off. Other harnesses cut long commands off themselves and keep the long default. An explicit `--wait-timeout` always wins.
+Pi CLI's bash tool executes synchronously in the foreground with a default bounded wait of **240 seconds**, after which the agent automatically re-runs the command to keep waiting.
 
 ## How It Works
 
@@ -58,7 +77,7 @@ Pi's `bash` tool also applies **no timeout** when the agent omits one, so an unb
                                                                              ▼
 ┌────────────────────────┐      ┌─────────────────────────┐      ┌────────────────────────┐
 │ Agent Continues Task   │ <--- │ .plan-feedback.json     │ <--- │ Browser Web Viewer     │
-│ (Reads User Feedback)  │      │ (Written on Submit)     │      │ (Auto-closes on Done)  │
+│ (Reads User Feedback)  │      │ (Written on Submit)     │      │ (Approved / Changes)   │
 └────────────────────────┘      └─────────────────────────┘      └────────────────────────┘
 ```
 
@@ -70,10 +89,22 @@ Preview any markdown plan file:
 plan-previewer ./plan.md
 ```
 
-Specify session context or custom port:
+Pass task context summary:
 
 ```bash
-plan-previewer ./plan.md --context="Building Realtime Notification System" --port=3456
+plan-previewer ./plan.md --context="Building Realtime Notification System"
+```
+
+Supply change response notes when revising a plan:
+
+```bash
+plan-previewer ./plan.md --response="Added Redis caching and updated database schema per requested changes."
+```
+
+Or read response notes from a file:
+
+```bash
+plan-previewer ./plan.md --response-file="./.plan-response.md"
 ```
 
 Explicitly override caller agent detection:
@@ -81,6 +112,7 @@ Explicitly override caller agent detection:
 ```bash
 plan-previewer ./plan.md --agent=claude
 plan-previewer ./plan.md --agent=pi
+plan-previewer ./plan.md --agent=antigravity
 ```
 
 ## CLI Options
@@ -88,12 +120,32 @@ plan-previewer ./plan.md --agent=pi
 | Flag | Description | Default |
 |---|---|---|
 | `[path]` | Path to target markdown plan file | `./plan.md` |
-| `--context=<string>`, `-c` | Task goal or session context summary | First `# Heading` |
+| `-c`, `--context=<string>` | Task goal or session context summary | First `# Heading` |
+| `-r`, `--response="<string>"` | Explanation of changes made in response to user feedback | None |
+| `--response-file="<path>"` | Path to markdown file containing change response notes | Auto `.plan-response.md` |
 | `--agent=<claude\|antigravity\|pi>` | Explicitly set calling agent | Auto-detected |
 | `--wait-timeout=<seconds>` | Max wait for a review decision before exiting | 240 under Pi CLI, otherwise unbounded |
-| `--port=<number>`, `-p` | Local HTTP server port | `3456` |
+| `-p`, `--port=<number>` | Local HTTP server port | `3456` |
 | `--no-open` | Do not automatically launch browser tab | `false` |
-| `install` | Install agent skills into Claude, Antigravity, and Pi CLI | N/A |
+| `install` | Install agent skills, rules, hooks, and extensions | N/A |
+
+## Rich Plan Markdown Formatting
+
+Plan Previewer parses special markdown callouts for interactive elements:
+
+```markdown
+> [!CHOICE] Database Architecture Choice
+> **Question**: Which caching system should we implement for the query layer?
+> - (x) **Option A**: Redis (Fast in-memory storage, supports pub/sub) [Recommended]
+> - ( ) **Option B**: Memcached (Simple key-value cache)
+> - ( ) **Option C**: PostgreSQL UNLOGGED table (No extra dependency)
+
+> [!QUESTION] Data Migration Requirement
+> **Question**: Do we need to run a background migration script for legacy user data?
+
+> [!IMPORTANT]
+> Key requirement: Must maintain backwards compatibility with v1 endpoints.
+```
 
 ## License
 
