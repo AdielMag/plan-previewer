@@ -1,19 +1,25 @@
-// Plan Previewer Client Application logic matching Claude Design Handoff
+// Plan Previewer Client Application
 
 let state = {
   filename: 'plan.md',
   filePath: '',
   content: '',
   fileVersion: 1,
-  callerAgent: { id: 'claude', name: 'Claude Code', icon: '🤖', badge: 'Claude Code' },
+  callerAgent: { id: 'claude', name: 'Claude Code', icon: '🤖', badge: 'Claude Code', color: '#D97706', accentColor: '#F59E0B' },
   sessionContext: 'Plan Overview',
   questions: [],
   feedbackHistory: [],
+  agentResponses: [],
+  selections: {}, // { [choiceTitle]: { selectedText, cleanTitle, isRecommended } }
+  draftAnswers: {}, // { [questionTitle]: answerText }
   nextQuestionId: 1,
   popover: { visible: false, x: 0, y: 0, text: '', range: null },
   footerComment: '',
   status: 'in_review', // 'in_review', 'approved', 'changes_requested'
-  serverAlive: true
+  serverAlive: true,
+  widthMode: 'wide',
+  collapseLeft: false,
+  collapseRight: false
 };
 
 let currentTheme = 'light';
@@ -24,7 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function initApp() {
   initTheme();
-
+  initLayoutSettings();
   setupEventListeners();
   startHeartbeat();
   startFilePolling();
@@ -84,16 +90,50 @@ function toggleTheme() {
   renderMarkdown();
 }
 
+function initLayoutSettings() {
+  const savedWidth = localStorage.getItem('plan-previewer-width-mode') || 'wide';
+  setWidthMode(savedWidth);
+
+  const savedCollapseLeft = localStorage.getItem('plan-previewer-collapse-left') === 'true';
+  const savedCollapseRight = localStorage.getItem('plan-previewer-collapse-right') === 'true';
+  setSidebarCollapsed('left', savedCollapseLeft);
+  setSidebarCollapsed('right', savedCollapseRight);
+}
+
+function setWidthMode(mode) {
+  state.widthMode = mode;
+  const layout = document.getElementById('appLayout');
+  if (layout) layout.setAttribute('data-width-mode', mode);
+  localStorage.setItem('plan-previewer-width-mode', mode);
+
+  document.querySelectorAll('.width-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.width === mode);
+  });
+}
+
+function setSidebarCollapsed(side, collapsed) {
+  const layout = document.getElementById('appLayout');
+  if (!layout) return;
+
+  if (side === 'left') {
+    state.collapseLeft = collapsed;
+    layout.classList.toggle('collapse-left', collapsed);
+    localStorage.setItem('plan-previewer-collapse-left', String(collapsed));
+    const btn = document.getElementById('btnToggleToc');
+    if (btn) btn.classList.toggle('collapsed', collapsed);
+  } else if (side === 'right') {
+    state.collapseRight = collapsed;
+    layout.classList.toggle('collapse-right', collapsed);
+    localStorage.setItem('plan-previewer-collapse-right', String(collapsed));
+    const btn = document.getElementById('btnToggleActivity');
+    if (btn) btn.classList.toggle('collapsed', collapsed);
+  }
+}
+
 function startHeartbeat() {
   setInterval(() => {
     fetch('/api/heartbeat', { method: 'POST' }).catch(() => {});
   }, 2000);
-
-  window.addEventListener('beforeunload', () => {
-    if (navigator.sendBeacon) {
-      navigator.sendBeacon('/api/shutdown');
-    }
-  });
 }
 
 function summarizeDiff(oldContent, newContent) {
@@ -139,13 +179,19 @@ function startFilePolling() {
         const planData = await planRes.json();
         if (planData.success) {
           const contentChanged = planData.content !== state.content;
+          state.agentResponses = planData.agentResponses || state.agentResponses;
           if (contentChanged) {
             const diffSummary = summarizeDiff(state.content, planData.content);
+            const latestResponse = (state.agentResponses && state.agentResponses.length)
+              ? state.agentResponses[state.agentResponses.length - 1].text
+              : '';
+
             state.feedbackHistory.forEach(item => {
               if (item.status === 'pending') {
                 item.status = 'addressed';
                 item.addressedAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 item.diffSummary = diffSummary;
+                item.agentNote = latestResponse;
               }
             });
             await fetchPlanData();
@@ -163,19 +209,27 @@ function startFilePolling() {
         const planRes = await fetch('/api/plan');
         const planData = await planRes.json();
 
-        if (planData.success && planData.content !== state.content) {
-          const diffSummary = summarizeDiff(state.content, planData.content);
-          state.feedbackHistory.forEach(item => {
-            if (item.status === 'pending') {
-              item.status = 'addressed';
-              item.addressedAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-              item.diffSummary = diffSummary;
-            }
-          });
+        if (planData.success) {
+          state.agentResponses = planData.agentResponses || state.agentResponses;
+          if (planData.content !== state.content) {
+            const diffSummary = summarizeDiff(state.content, planData.content);
+            const latestResponse = (state.agentResponses && state.agentResponses.length)
+              ? state.agentResponses[state.agentResponses.length - 1].text
+              : '';
 
-          await fetchPlanData();
-          showAgentUpdateToast('Plan updated live by agent!');
-          renderQuestionsSidebar();
+            state.feedbackHistory.forEach(item => {
+              if (item.status === 'pending') {
+                item.status = 'addressed';
+                item.addressedAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                item.diffSummary = diffSummary;
+                item.agentNote = latestResponse;
+              }
+            });
+
+            await fetchPlanData();
+            showAgentUpdateToast('Plan updated live by agent!');
+            renderQuestionsSidebar();
+          }
         }
       }
     } catch (err) {
@@ -187,18 +241,39 @@ function startFilePolling() {
   }, 1000);
 }
 
+function updateActionButtonsState() {
+  const requestBtn = document.getElementById('btnRequestChanges');
+  if (!requestBtn) return;
+
+  const commentVal = document.getElementById('footerComment')?.value.trim() || '';
+  const hasSelections = Object.keys(state.selections).length > 0;
+  const hasAnswers = Object.keys(state.draftAnswers).length > 0;
+  const hasQuestions = state.questions.length > 0;
+  const hasPendingActivity = Boolean(commentVal || hasSelections || hasAnswers || hasQuestions);
+
+  if (!state.serverAlive) {
+    requestBtn.disabled = true;
+    requestBtn.classList.add('btn-disabled');
+    requestBtn.title = 'Waiting for the agent to respond...';
+    return;
+  }
+
+  requestBtn.disabled = !hasPendingActivity;
+  requestBtn.classList.toggle('btn-disabled', !hasPendingActivity);
+  requestBtn.title = hasPendingActivity
+    ? 'Transmit requested changes & selections to agent'
+    : 'Select an option, answer a question, leave a text note, or type a comment to request changes';
+}
+
 function updateSubmitButtonsEnabled() {
   const requestBtn = document.getElementById('btnRequestChanges');
   const approveBtn = document.getElementById('btnApprovePlan');
   if (!requestBtn || !approveBtn) return;
 
-  // While the server is down (agent is addressing feedback, or a
-  // wait-timeout retry cycle is in progress), there's nothing listening to
-  // submit to - disable submission instead of letting it fail.
-  requestBtn.disabled = !state.serverAlive;
   approveBtn.disabled = !state.serverAlive;
-  requestBtn.title = state.serverAlive ? '' : 'Waiting for the agent to respond...';
-  approveBtn.title = state.serverAlive ? '' : 'Waiting for the agent to respond...';
+  approveBtn.title = state.serverAlive ? 'Approve plan and start execution' : 'Waiting for the agent to respond...';
+
+  updateActionButtonsState();
 }
 
 function showAgentUpdateToast(msg) {
@@ -218,39 +293,62 @@ async function fetchPlanData() {
     const res = await fetch('/api/plan');
     const data = await res.json();
     if (data.success) {
-      state.filename = data.filename;
-      state.filePath = data.filePath;
-      state.content = data.content;
+      state.filename = data.filename || 'plan.md';
+      state.filePath = data.filePath || '';
+      state.content = data.content || '';
       state.fileVersion = data.fileVersion || state.fileVersion;
       state.callerAgent = data.callerAgent || state.callerAgent;
       state.sessionContext = data.sessionContext || extractPlanGoal(data.content);
+      state.agentResponses = data.agentResponses || [];
+
+      // Save to localStorage as fallback so page is NEVER blank
+      if (state.content) {
+        try {
+          localStorage.setItem('plan-previewer-cached-content', state.content);
+          localStorage.setItem('plan-previewer-cached-meta', JSON.stringify({
+            filename: state.filename,
+            filePath: state.filePath,
+            sessionContext: state.sessionContext,
+            callerAgent: state.callerAgent
+          }));
+        } catch (e) {}
+      }
 
       updateHeader();
       renderMarkdown();
       renderQuestionsSidebar();
     }
   } catch (err) {
-    console.error('Failed to load plan data:', err);
+    console.warn('Could not fetch live plan data (server may be offline):', err);
+    // Restore from localStorage cache so the plan is never empty
+    const cachedContent = localStorage.getItem('plan-previewer-cached-content');
+    if (cachedContent && !state.content) {
+      state.content = cachedContent;
+      try {
+        const meta = JSON.parse(localStorage.getItem('plan-previewer-cached-meta') || '{}');
+        if (meta.filename) state.filename = meta.filename;
+        if (meta.filePath) state.filePath = meta.filePath;
+        if (meta.sessionContext) state.sessionContext = meta.sessionContext;
+        if (meta.callerAgent) state.callerAgent = meta.callerAgent;
+      } catch (e) {}
+      updateHeader();
+      renderMarkdown();
+      renderQuestionsSidebar();
+    }
   }
 }
 
 function extractPlanGoal(content) {
+  if (!content) return 'Plan Overview';
   const match = content.match(/^#\s+(.+)$/m);
   return match && match[1] ? match[1].trim() : 'Plan Overview';
 }
 
 function updateHeader() {
   const agentName = state.callerAgent.name || 'Claude Code';
-  const initial = agentName.trim().charAt(0).toUpperCase() || 'C';
-  
   const avatar = document.getElementById('agentAvatar');
-  avatar.textContent = initial;
-
-  if (state.callerAgent.id === 'antigravity') {
-    avatar.style.background = 'linear-gradient(135deg, #4285F4, #34A853)';
-  } else {
-    avatar.style.background = 'linear-gradient(135deg, oklch(72% 0.13 195), oklch(60% 0.14 250))';
-  }
+  avatar.textContent = getAgentAvatarSymbol(state.callerAgent);
+  avatar.style.cssText = getAgentAvatarStyle(state.callerAgent);
 
   document.getElementById('agentName').textContent = agentName;
   document.getElementById('pathLine').textContent = `${state.filename} · ${state.filePath}`;
@@ -277,46 +375,194 @@ function updateStatusPill(status) {
   }
 }
 
+function simpleMarkdownParse(md) {
+  if (!md) return '';
+  let html = '';
+  const lines = md.split(/\r?\n/);
+  let inCodeBlock = false;
+  let codeBlockLang = '';
+  let codeBuffer = [];
+  let inList = false;
+  let inBlockquote = false;
+  let bqBuffer = [];
+
+  function flushBlockquote() {
+    if (bqBuffer.length > 0) {
+      html += `<blockquote>${simpleMarkdownParse(bqBuffer.join('\n'))}</blockquote>\n`;
+      bqBuffer = [];
+    }
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Code blocks
+    if (line.startsWith('```')) {
+      if (!inCodeBlock) {
+        flushBlockquote();
+        if (inList) { html += '</ul>\n'; inList = false; }
+        inCodeBlock = true;
+        codeBlockLang = line.slice(3).trim();
+        codeBuffer = [];
+      } else {
+        inCodeBlock = false;
+        html += `<pre><code class="language-${codeBlockLang}">${escapeHtml(codeBuffer.join('\n'))}</code></pre>\n`;
+        codeBuffer = [];
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      codeBuffer.push(line);
+      continue;
+    }
+
+    // Blockquotes
+    if (line.startsWith('>')) {
+      if (inList) { html += '</ul>\n'; inList = false; }
+      bqBuffer.push(line.replace(/^>\s?/, ''));
+      continue;
+    } else {
+      flushBlockquote();
+    }
+
+    // Horizontal rules
+    if (/^(\*{3,}|-{3,}|_{3,})$/.test(line.trim())) {
+      if (inList) { html += '</ul>\n'; inList = false; }
+      html += '<hr>\n';
+      continue;
+    }
+
+    // Headings
+    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+    if (headingMatch) {
+      if (inList) { html += '</ul>\n'; inList = false; }
+      const level = headingMatch[1].length;
+      html += `<h${level}>${formatInlineMarkdown(headingMatch[2])}</h${level}>\n`;
+      continue;
+    }
+
+    // Lists & task lists
+    const taskMatch = line.match(/^\s*-\s+\[([ xX])\]\s+(.+)$/);
+    if (taskMatch) {
+      if (!inList) { html += '<ul>\n'; inList = true; }
+      const checked = taskMatch[1].toLowerCase() === 'x' ? 'checked' : '';
+      html += `<li><input type="checkbox" ${checked} disabled> ${formatInlineMarkdown(taskMatch[2])}</li>\n`;
+      continue;
+    }
+
+    const listMatch = line.match(/^\s*[-*]\s+(.+)$/);
+    if (listMatch) {
+      if (!inList) { html += '<ul>\n'; inList = true; }
+      html += `<li>${formatInlineMarkdown(listMatch[1])}</li>\n`;
+      continue;
+    }
+
+    if (inList && line.trim() === '') {
+      html += '</ul>\n';
+      inList = false;
+      continue;
+    }
+
+    // Tables
+    if (line.includes('|') && line.trim().startsWith('|')) {
+      if (inList) { html += '</ul>\n'; inList = false; }
+      // Table rows
+      if (line.includes('---')) continue; // delimiter row
+      const cells = line.split('|').map(c => c.trim()).filter((_, idx, arr) => idx > 0 && idx < arr.length - 1);
+      html += `<tr>${cells.map(c => `<td>${formatInlineMarkdown(c)}</td>`).join('')}</tr>\n`;
+      continue;
+    }
+
+    // Paragraphs
+    if (line.trim() !== '') {
+      html += `<p>${formatInlineMarkdown(line)}</p>\n`;
+    }
+  }
+
+  flushBlockquote();
+  if (inList) { html += '</ul>\n'; inList = false; }
+  return html;
+}
+
+function formatInlineMarkdown(text) {
+  if (!text) return '';
+  return escapeHtml(text)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+}
+
 async function renderMarkdown() {
   const output = document.getElementById('renderedOutput');
+  if (!output) return;
 
-  marked.setOptions({
-    gfm: true,
-    breaks: false
-  });
+  if (!state.content) {
+    const cachedContent = localStorage.getItem('plan-previewer-cached-content');
+    if (cachedContent) {
+      state.content = cachedContent;
+    } else {
+      output.innerHTML = `
+        <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+          <p>No plan content loaded. Waiting for agent session...</p>
+        </div>`;
+      return;
+    }
+  }
 
-  let rawHtml = marked.parse(state.content);
+  let rawHtml = '';
+  if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
+    try {
+      if (typeof marked.setOptions === 'function') {
+        marked.setOptions({ gfm: true, breaks: false });
+      }
+      rawHtml = marked.parse(state.content);
+    } catch (e) {
+      console.warn('Marked.js error, falling back:', e);
+      rawHtml = simpleMarkdownParse(state.content);
+    }
+  } else {
+    rawHtml = simpleMarkdownParse(state.content);
+  }
+
   output.innerHTML = rawHtml;
 
   // Process GitHub callout alerts & interactive Choice/Question cards
-  processGitHubAlerts(output);
+  try { processGitHubAlerts(output); } catch (e) { console.warn('Alert processing error:', e); }
 
   // Process image placeholders
-  output.querySelectorAll('img').forEach((img) => {
-    const div = document.createElement('div');
-    div.className = 'img-slot';
-    div.textContent = '◇ ' + (img.alt || 'Diagram placeholder');
-    img.replaceWith(div);
-  });
+  try {
+    output.querySelectorAll('img').forEach((img) => {
+      const div = document.createElement('div');
+      div.className = 'img-slot';
+      div.textContent = '◇ ' + (img.alt || 'Diagram placeholder');
+      img.replaceWith(div);
+    });
+  } catch (e) {}
 
   // Render Mermaid diagrams
-  await processMermaidDiagrams(output);
+  try { await processMermaidDiagrams(output); } catch (e) { console.warn('Mermaid render error:', e); }
 
   // Highlight code blocks
-  output.querySelectorAll('pre code').forEach((block) => {
-    if (!block.classList.contains('language-mermaid')) {
-      hljs.highlightElement(block);
+  try {
+    if (typeof hljs !== 'undefined') {
+      output.querySelectorAll('pre code').forEach((block) => {
+        if (!block.classList.contains('language-mermaid')) {
+          hljs.highlightElement(block);
+        }
+      });
     }
-  });
+  } catch (e) {}
 
   // Process file diff badges and risk tags
-  processVisualBadges(output);
+  try { processVisualBadges(output); } catch (e) {}
 
   // Process task checkboxes & update progress bar
-  processCheckboxes();
+  try { processCheckboxes(); } catch (e) {}
 
   // Generate Table of Contents navigation sidebar
-  generateTableOfContents(output);
+  try { generateTableOfContents(output); } catch (e) {}
 }
 
 function processGitHubAlerts(container) {
@@ -366,14 +612,62 @@ function processGitHubAlerts(container) {
   });
 }
 
+function parseChoiceItemData(rawText) {
+  const trimmed = rawText.trim();
+  const isDefaultChecked = /^\([xX]\)/.test(trimmed);
+  const isRecommended = isDefaultChecked || /\[recommended\]/i.test(trimmed);
+
+  let clean = trimmed.replace(/^\([ xX]\)\s*/, '').replace(/\s*\[recommended\]\s*/i, '').trim();
+  let title = clean;
+  let description = '';
+
+  const boldMatch = clean.match(/^\*\*([^*]+)\*\*[:\-—]?\s*(.*)$/);
+  if (boldMatch) {
+    title = boldMatch[1].trim();
+    description = boldMatch[2].trim();
+  } else {
+    const parenMatch = clean.match(/^([^(]+)\(([^)]+)\)\s*$/);
+    if (parenMatch && parenMatch[1].trim().length > 0) {
+      title = parenMatch[1].trim();
+      description = parenMatch[2].trim();
+    }
+  }
+
+  return { title, description, isRecommended, isDefaultChecked, cleanText: clean };
+}
+
 function renderInteractiveChoiceCard(bq, title, groupIdx) {
   const card = document.createElement('div');
-  card.className = 'github-alert alert-choice interactive-choice-card';
+  card.className = 'interactive-choice-card';
+  card.id = `choice_card_${groupIdx}`;
   card.dataset.choiceTitle = title;
 
+  // Header with title, status chip, and clear button
   const header = document.createElement('div');
-  header.className = 'alert-title';
-  header.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg><span>DESIGN CHOICE: ${title}</span>`;
+  header.className = 'choice-card-header';
+
+  const titleGroup = document.createElement('div');
+  titleGroup.className = 'choice-card-title-group';
+  titleGroup.innerHTML = `
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
+    <span>DESIGN CHOICE: ${escapeHtml(title)}</span>`;
+  header.appendChild(titleGroup);
+
+  const actions = document.createElement('div');
+  actions.className = 'choice-card-actions';
+
+  const statusBadge = document.createElement('span');
+  statusBadge.className = 'card-status-badge unanswered';
+  statusBadge.textContent = 'Not answered';
+  actions.appendChild(statusBadge);
+
+  const clearBtn = document.createElement('button');
+  clearBtn.className = 'btn-clear-choice';
+  clearBtn.textContent = 'Clear';
+  clearBtn.style.display = 'none';
+  actions.appendChild(clearBtn);
+
+  header.appendChild(actions);
   card.appendChild(header);
 
   const body = document.createElement('div');
@@ -395,9 +689,33 @@ function renderInteractiveChoiceCard(bq, title, groupIdx) {
   const optionsContainer = document.createElement('div');
   optionsContainer.className = 'choice-options-list';
 
+  function updateCardState(selectedVal) {
+    if (selectedVal) {
+      statusBadge.className = 'card-status-badge answered';
+      statusBadge.textContent = 'Selected';
+      clearBtn.style.display = 'inline-block';
+      state.selections[title] = { selectedText: selectedVal, cardId: card.id };
+    } else {
+      statusBadge.className = 'card-status-badge unanswered';
+      statusBadge.textContent = 'Not answered';
+      clearBtn.style.display = 'none';
+      delete state.selections[title];
+    }
+    updateActionButtonsState();
+    renderQuestionsSidebar();
+  }
+
+  clearBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    optionsContainer.querySelectorAll('input[type="radio"]').forEach((r) => (r.checked = false));
+    optionsContainer.querySelectorAll('.choice-option-item').forEach((el) => el.classList.remove('selected'));
+    updateCardState(null);
+  });
+
   items.forEach((li) => {
-    const text = li.textContent.trim();
-    const cleanText = text.replace(/^\([ xX]\)\s*/, '');
+    const rawText = li.textContent.trim();
+    const { title: optTitle, description: optDesc, isRecommended, cleanText } = parseChoiceItemData(rawText);
 
     const optLabel = document.createElement('label');
     optLabel.className = 'choice-option-item';
@@ -406,29 +724,60 @@ function renderInteractiveChoiceCard(bq, title, groupIdx) {
     radio.type = 'radio';
     radio.name = `choice_group_${groupIdx}`;
     radio.value = cleanText;
-    radio.checked = false; // No option picked by default
+    radio.checked = false;
+    radio.style.position = 'absolute';
+    radio.style.opacity = '0';
+    radio.style.pointerEvents = 'none';
 
-    // Deselect capability: clicking an active option deselects it
+    const indicator = document.createElement('div');
+    indicator.className = 'choice-radio-indicator';
+    indicator.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>`;
+
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'choice-option-content';
+
+    const headerRow = document.createElement('div');
+    headerRow.className = 'choice-option-header-row';
+
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'choice-option-title';
+    titleSpan.textContent = optTitle;
+    headerRow.appendChild(titleSpan);
+
+    if (isRecommended) {
+      const recBadge = document.createElement('span');
+      recBadge.className = 'badge-recommended';
+      recBadge.textContent = 'Recommended';
+      headerRow.appendChild(recBadge);
+    }
+    contentDiv.appendChild(headerRow);
+
+    if (optDesc) {
+      const descSpan = document.createElement('span');
+      descSpan.className = 'choice-option-desc';
+      descSpan.textContent = optDesc;
+      contentDiv.appendChild(descSpan);
+    }
+
     optLabel.addEventListener('click', (e) => {
       e.preventDefault();
-      const wasChecked = radio.checked;
+      const wasSelected = optLabel.classList.contains('selected');
 
-      // Clear all radios in this choice card
-      optionsContainer.querySelectorAll('input[type="radio"]').forEach(r => r.checked = false);
-      optionsContainer.querySelectorAll('.choice-option-item').forEach(el => el.classList.remove('selected'));
+      optionsContainer.querySelectorAll('input[type="radio"]').forEach((r) => (r.checked = false));
+      optionsContainer.querySelectorAll('.choice-option-item').forEach((el) => el.classList.remove('selected'));
 
-      if (!wasChecked) {
+      if (!wasSelected) {
         radio.checked = true;
         optLabel.classList.add('selected');
+        updateCardState(cleanText);
+      } else {
+        updateCardState(null);
       }
     });
 
     optLabel.appendChild(radio);
-
-    const span = document.createElement('span');
-    span.innerHTML = cleanText;
-    optLabel.appendChild(span);
-
+    optLabel.appendChild(indicator);
+    optLabel.appendChild(contentDiv);
     optionsContainer.appendChild(optLabel);
   });
 
@@ -439,12 +788,25 @@ function renderInteractiveChoiceCard(bq, title, groupIdx) {
 
 function renderInteractiveQuestionCard(bq, title) {
   const card = document.createElement('div');
-  card.className = 'github-alert alert-question interactive-question-card';
+  card.className = 'interactive-question-card';
+  card.id = `question_card_${Math.random().toString(36).slice(2, 8)}`;
   card.dataset.questionTitle = title;
 
   const header = document.createElement('div');
-  header.className = 'alert-title';
-  header.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span>OPEN QUESTION: ${title}</span>`;
+  header.className = 'choice-card-header';
+
+  const titleGroup = document.createElement('div');
+  titleGroup.className = 'choice-card-title-group question-card-title-group';
+  titleGroup.innerHTML = `
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    <span>OPEN QUESTION: ${escapeHtml(title)}</span>`;
+  header.appendChild(titleGroup);
+
+  const statusBadge = document.createElement('span');
+  statusBadge.className = 'card-status-badge unanswered';
+  statusBadge.textContent = 'Unanswered';
+  header.appendChild(statusBadge);
+
   card.appendChild(header);
 
   const body = document.createElement('div');
@@ -465,6 +827,25 @@ function renderInteractiveQuestionCard(bq, title) {
   textarea.className = 'question-card-textarea';
   textarea.placeholder = 'Type your answer or preference for the agent here…';
   textarea.rows = 2;
+
+  let debounceTimer = null;
+  textarea.addEventListener('input', () => {
+    const val = textarea.value.trim();
+    if (val) {
+      statusBadge.className = 'card-status-badge answered';
+      statusBadge.textContent = 'Answered';
+      state.draftAnswers[title] = { answer: val, cardId: card.id };
+    } else {
+      statusBadge.className = 'card-status-badge unanswered';
+      statusBadge.textContent = 'Unanswered';
+      delete state.draftAnswers[title];
+    }
+    updateActionButtonsState();
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      renderQuestionsSidebar();
+    }, 200);
+  });
 
   body.appendChild(textarea);
   card.appendChild(body);
@@ -501,15 +882,14 @@ function processVisualBadges(container) {
     { text: '[MODIFY]', class: 'badge-modify' },
     { text: '[DELETE]', class: 'badge-delete' },
     { text: '[HIGH RISK]', class: 'badge-high-risk' },
-    { text: '[LOW RISK]', class: 'badge-low-risk' }
+    { text: '[LOW RISK]', class: 'badge-low-risk' },
   ];
 
-  container.querySelectorAll('h1, h2, h3, h4, h5, p, li').forEach((el) => {
+  container.querySelectorAll('h1, h2, h3, h4, li, p').forEach((el) => {
     let html = el.innerHTML;
     badgeMap.forEach((badge) => {
       if (html.includes(badge.text)) {
-        const span = `<span class="inline-badge ${badge.class}">${badge.text.replace(/\[|\]/g, '')}</span>`;
-        html = html.split(badge.text).join(span);
+        html = html.replace(badge.text, `<span class="badge-tag ${badge.class}">${badge.text.replace(/[[\]]/g, '')}</span>`);
       }
     });
     el.innerHTML = html;
@@ -517,100 +897,49 @@ function processVisualBadges(container) {
 }
 
 function processCheckboxes() {
-  const output = document.getElementById('renderedOutput');
-  let totalTasks = 0;
-  let completedTasks = 0;
+  const total = document.querySelectorAll('input[type="checkbox"]').length;
+  const checked = document.querySelectorAll('input[type="checkbox"]:checked').length;
+  const headerProg = document.getElementById('headerProgress');
 
-  output.querySelectorAll('li').forEach((li) => {
-    const text = li.innerHTML.trim();
-    if (text.startsWith('[ ]') || text.startsWith('[x]') || text.startsWith('[X]')) {
-      totalTasks++;
-      const isChecked = text.startsWith('[x]') || text.startsWith('[X]');
-      if (isChecked) completedTasks++;
-
-      li.classList.add('task-item');
-      
-      const cleanText = text.replace(/^\[[ xX]\]/, '');
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.checked = isChecked;
-      checkbox.addEventListener('change', () => toggleTaskInMarkdown(cleanText.trim(), checkbox.checked));
-
-      li.innerHTML = '';
-      li.appendChild(checkbox);
-      
-      const label = document.createElement('span');
-      label.innerHTML = cleanText;
-      if (isChecked) label.style.textDecoration = 'line-through';
-      li.appendChild(label);
-    }
-  });
-
-  // Update header progress bar
-  const progressHeader = document.getElementById('headerProgress');
-  const progressText = document.getElementById('progressText');
-  const progressFill = document.getElementById('progressFill');
-
-  if (totalTasks > 0) {
-    const pct = Math.round((completedTasks / totalTasks) * 100);
-    progressText.textContent = `${pct}% Complete (${completedTasks}/${totalTasks})`;
-    progressFill.style.width = `${pct}%`;
-    progressHeader.style.display = 'flex';
-  } else {
-    progressHeader.style.display = 'none';
+  if (total > 0 && headerProg) {
+    headerProg.style.display = 'flex';
+    const percent = Math.round((checked / total) * 100);
+    document.getElementById('progressFill').style.width = `${percent}%`;
+    document.getElementById('progressText').textContent = `${percent}% Complete`;
   }
 }
 
 function generateTableOfContents(container) {
   const tocList = document.getElementById('tocList');
   if (!tocList) return;
-
-  const headings = container.querySelectorAll('h1, h2, h3');
   tocList.innerHTML = '';
 
-  if (headings.length === 0) {
-    tocList.innerHTML = '<div class="empty-toc">No outline available</div>';
-    return;
-  }
-
+  const headings = container.querySelectorAll('h1, h2, h3');
   headings.forEach((heading, idx) => {
-    const id = heading.id || `heading-${idx}`;
+    const id = `section-${idx}`;
     heading.id = id;
 
-    const level = heading.tagName.toLowerCase();
-    const item = document.createElement('a');
-    item.className = `toc-item toc-${level}`;
-    item.href = `#${id}`;
+    const item = document.createElement('div');
+    item.className = `toc-item toc-${heading.tagName.toLowerCase()}`;
     item.textContent = heading.textContent.replace(/^(#+\s*|\[!(NOTE|TIP|WARNING|CHOICE|QUESTION)\])/, '').trim();
 
-    item.addEventListener('click', (e) => {
-      e.preventDefault();
-      heading.scrollIntoView({ behavior: 'smooth' });
+    item.addEventListener('click', () => {
+      heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 
     tocList.appendChild(item);
   });
 }
 
-function toggleTaskInMarkdown(taskSubstring, isNowChecked) {
-  let lines = state.content.split('\n');
-  let updated = false;
+function scrollAndHighlight(elementId) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
 
-  lines = lines.map((line) => {
-    if (!updated && line.includes(taskSubstring.substring(0, 20))) {
-      if (isNowChecked) {
-        line = line.replace('- [ ]', '- [x]').replace('* [ ]', '* [x]');
-      } else {
-        line = line.replace(/- \[[xX]\]/, '- [ ]').replace(/\* \[[xX]\]/, '* [ ]');
-      }
-      updated = true;
-    }
-    return line;
-  });
-
-  state.content = lines.join('\n');
-  saveMarkdownToServer();
-  renderMarkdown();
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.remove('highlight-flash');
+  void el.offsetWidth; // Trigger reflow
+  el.classList.add('highlight-flash');
+  setTimeout(() => el.classList.remove('highlight-flash'), 1500);
 }
 
 function setupEventListeners() {
@@ -658,6 +987,28 @@ function setupEventListeners() {
 
   document.getElementById('btnPopoverAsk').addEventListener('click', submitQuestionFromPopover);
 
+  // Width mode switcher
+  document.querySelectorAll('.width-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      setWidthMode(btn.dataset.width);
+    });
+  });
+
+  // Sidebar toggle buttons
+  const btnToggleToc = document.getElementById('btnToggleToc');
+  if (btnToggleToc) {
+    btnToggleToc.addEventListener('click', () => {
+      setSidebarCollapsed('left', !state.collapseLeft);
+    });
+  }
+
+  const btnToggleActivity = document.getElementById('btnToggleActivity');
+  if (btnToggleActivity) {
+    btnToggleActivity.addEventListener('click', () => {
+      setSidebarCollapsed('right', !state.collapseRight);
+    });
+  }
+
   // Theme Switcher button
   const themeToggle = document.getElementById('btnThemeToggle');
   if (themeToggle) {
@@ -668,82 +1019,85 @@ function setupEventListeners() {
   document.getElementById('btnHeaderClose').addEventListener('click', goBackAndClose);
   document.getElementById('btnModalClose').addEventListener('click', closeTab);
 
+  // Footer comment input listener
+  const footerInput = document.getElementById('footerComment');
+  if (footerInput) {
+    footerInput.addEventListener('input', updateActionButtonsState);
+  }
+
   // Footer Actions
   updateSubmitButtonsEnabled();
 
   document.getElementById('btnRequestChanges').addEventListener('click', () => {
     if (!state.serverAlive) return;
-    state.status = 'changes_requested';
-    updateStatusPill(state.status);
     submitFeedback('changes_requested');
   });
 
   document.getElementById('btnApprovePlan').addEventListener('click', () => {
     if (!state.serverAlive) return;
-    state.status = 'approved';
-    updateStatusPill(state.status);
     submitFeedback('approved');
   });
 }
 
 function closePopover() {
-  state.popover = { visible: false, x: 0, y: 0, text: '', range: null };
-  document.getElementById('selectionPopover').style.display = 'none';
+  const popover = document.getElementById('selectionPopover');
+  popover.style.display = 'none';
+  state.popover.visible = false;
+  window.getSelection().removeAllRanges();
 }
 
 function submitQuestionFromPopover() {
   const input = document.getElementById('popoverInput');
-  const questionText = input.value.trim();
-  if (!questionText) return;
+  const text = input.value.trim();
+  if (!text) return;
 
-  const { range, text } = state.popover;
-  const id = state.nextQuestionId;
+  const quote = state.popover.text;
+  const questionId = state.nextQuestionId++;
 
-  try {
-    if (range) {
-      const mark = document.createElement('span');
-      mark.className = 'commark';
-      mark.dataset.commentId = id;
-      range.surroundContents(mark);
+  state.questions.push({
+    id: questionId,
+    quote,
+    text,
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  });
 
-      const badge = document.createElement('sup');
-      badge.className = 'commark-badge';
-      badge.textContent = id;
-      mark.after(badge);
-    }
-  } catch (e) {}
-
-  const question = {
-    id,
-    quote: text.length > 90 ? text.slice(0, 90) + '…' : text,
-    text: questionText,
-  };
-
-  state.questions.push(question);
-  state.nextQuestionId = id + 1;
-
-  window.getSelection().removeAllRanges();
+  highlightTextSnippet(state.popover.range, questionId);
   closePopover();
+  updateActionButtonsState();
   renderQuestionsSidebar();
+}
+
+function highlightTextSnippet(range, questionId) {
+  if (!range) return;
+  try {
+    const mark = document.createElement('mark');
+    mark.className = 'commark';
+    mark.dataset.commentId = questionId;
+
+    const spanBadge = document.createElement('span');
+    spanBadge.className = 'commark-badge';
+    spanBadge.textContent = 'Q';
+
+    range.surroundContents(mark);
+    mark.after(spanBadge);
+  } catch (e) {
+    console.warn('Could not highlight snippet directly:', e);
+  }
 }
 
 function getAgentAvatarStyle(agent) {
   if (!agent) return 'background: linear-gradient(135deg, #2563eb, #0284c7);';
-  if (agent.id === 'antigravity') {
-    return 'background: linear-gradient(135deg, #4285F4, #34A853);';
+  if (agent.color && agent.accentColor) {
+    return `background: linear-gradient(135deg, ${agent.color}, ${agent.accentColor});`;
   }
-  if (agent.id === 'claude') {
-    return 'background: linear-gradient(135deg, #D97706, #F59E0B);';
-  }
-  return `background: linear-gradient(135deg, ${agent.color || '#2563eb'}, ${agent.accentColor || '#0284c7'});`;
+  return 'background: linear-gradient(135deg, #2563eb, #0284c7);';
 }
 
 function getAgentAvatarSymbol(agent) {
   if (!agent) return '🤖';
-  if (agent.id === 'antigravity') return '⚡';
   if (agent.icon) return agent.icon;
   const initial = (agent.name || 'A').trim().charAt(0).toUpperCase();
-  return initial;
+  return initial || '🤖';
 }
 
 function escapeHtml(str) {
@@ -760,7 +1114,12 @@ function renderQuestionsSidebar() {
   const list = document.getElementById('questionsList');
   const badge = document.getElementById('sidebarBadge');
 
-  const totalItems = state.questions.length + state.feedbackHistory.length;
+  const selectionKeys = Object.keys(state.selections);
+  const draftAnswerKeys = Object.keys(state.draftAnswers);
+  const totalDraftCount = selectionKeys.length + draftAnswerKeys.length;
+  const totalHistoryCount = state.questions.length + state.feedbackHistory.length;
+  const totalItems = totalDraftCount + totalHistoryCount;
+
   badge.textContent = totalItems;
 
   if (totalItems === 0) {
@@ -768,101 +1127,134 @@ function renderQuestionsSidebar() {
       <div class="empty-sidebar">
         <div class="empty-icon">💬</div>
         <div class="empty-title">Activity Feed Empty</div>
-        <div class="empty-sub">Select text in the plan to ask a question, or submit comments below.</div>
+        <div class="empty-sub">Make design choices in the plan, select text to ask questions, or write overall comments below.</div>
       </div>`;
     return;
   }
 
-  let html = '<div class="chat-stream">';
+  let html = '';
 
-  const agentName = state.callerAgent.name || 'Agent';
-  const agentStyle = getAgentAvatarStyle(state.callerAgent);
-  const agentSymbol = getAgentAvatarSymbol(state.callerAgent);
-
-  // Render submitted feedback history entries and agent responses/typing status
-  state.feedbackHistory.forEach((item) => {
-    // User Chat Bubble
+  // 1. Render Draft Selections & Answers Panel (if any active)
+  if (totalDraftCount > 0) {
     html += `
-      <div class="chat-bubble bubble-user">
-        <div class="bubble-header">
-          <div class="user-avatar-sm">You</div>
-          <span class="bubble-sender">You</span>
-          <span class="bubble-tag">Requested Changes</span>
-          <span class="bubble-time">${item.timestamp}</span>
+      <div class="draft-selections-box">
+        <div class="draft-selections-header">
+          <span>Draft Choices (${totalDraftCount})</span>
         </div>
-        <div class="bubble-body-text">${escapeHtml(item.text)}</div>
-      </div>
-    `;
+        <div class="draft-items-list">`;
 
-    // Agent Chat Bubble: Typing state or Response
-    if (item.status === 'pending') {
+    selectionKeys.forEach((title) => {
+      const item = state.selections[title];
       html += `
-        <div class="chat-bubble bubble-agent bubble-typing">
-          <div class="bubble-header">
-            <div class="agent-avatar-sm" style="${agentStyle}">${agentSymbol}</div>
-            <span class="bubble-sender">${escapeHtml(agentName)}</span>
-            <span class="bubble-time">Just now</span>
+        <div class="draft-selection-pill pill-choice" onclick="scrollAndHighlight('${item.cardId}')" title="Design Choice: Click to scroll to this card">
+          <div>
+            <span class="pill-title">Choice:</span>
+            <span>${escapeHtml(item.selectedText)}</span>
           </div>
-          <div class="typing-indicator">
-            <span class="typing-label">${escapeHtml(agentName)} is updating the plan</span>
-            <div class="typing-dots" title="Waiting for response from ${escapeHtml(agentName)}">
-              <span class="dot"></span>
-              <span class="dot"></span>
-              <span class="dot"></span>
-            </div>
-          </div>
-        </div>
-      `;
-    } else {
-      const responseTime = item.addressedAt || item.timestamp;
-      const diff = item.diffSummary;
-      const bodyText = diff
-        ? `Plan updated by <strong>${escapeHtml(agentName)}</strong> - <span class="diff-stat"><span class="diff-added">+${diff.added}</span> / <span class="diff-removed">-${diff.removed}</span> lines</span>${
-            diff.headings.length
-              ? `<div class="diff-sections">Changed: ${diff.headings.map((h) => `<code>${escapeHtml(h)}</code>`).join(', ')}</div>`
-              : ''
-          }`
-        : `Plan was updated live by <strong>${escapeHtml(agentName)}</strong> to address your requested changes.`;
-      html += `
-        <div class="chat-bubble bubble-agent bubble-response">
-          <div class="bubble-header">
-            <div class="agent-avatar-sm" style="${agentStyle}">${agentSymbol}</div>
-            <span class="bubble-sender">${escapeHtml(agentName)}</span>
-            <span class="bubble-time">${responseTime}</span>
-          </div>
-          <div class="bubble-response-content">
-            <div class="response-status-badge">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-              <span>Plan Updated</span>
-            </div>
-            <div class="response-body-text">${bodyText}</div>
-          </div>
-        </div>
-      `;
-    }
-  });
+          <svg class="pill-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>`;
+    });
 
-  // Render section questions as User Chat Bubbles
-  state.questions.forEach((q) => {
+    draftAnswerKeys.forEach((title) => {
+      const item = state.draftAnswers[title];
+      html += `
+        <div class="draft-selection-pill pill-question" onclick="scrollAndHighlight('${item.cardId}')" title="Question Answer: Click to scroll to this card">
+          <div>
+            <span class="pill-title">Answer:</span>
+            <span>"${escapeHtml(item.answer)}"</span>
+          </div>
+          <svg class="pill-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>`;
+    });
+
     html += `
-      <div class="chat-bubble bubble-user bubble-question">
-        <div class="bubble-header">
-          <div class="user-avatar-sm">You</div>
-          <span class="bubble-sender">You</span>
-          <span class="bubble-tag">Question</span>
-          <button class="btn-delete-chat-item" onclick="deleteQuestion(${q.id})" title="Delete question">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
         </div>
-        <div class="chat-quote">"${escapeHtml(q.quote)}"</div>
-        <div class="bubble-body-text">${escapeHtml(q.text)}</div>
-      </div>
-    `;
-  });
+      </div>`;
+  }
 
-  html += '</div>';
+  // 2. Render Submitted History Stream
+  if (totalHistoryCount > 0) {
+    html += '<div class="chat-stream">';
+
+    const agentName = state.callerAgent.name || 'Agent';
+    const agentStyle = getAgentAvatarStyle(state.callerAgent);
+    const agentSymbol = getAgentAvatarSymbol(state.callerAgent);
+
+    state.feedbackHistory.forEach((item) => {
+      // User requested changes bubble
+      html += `
+        <div class="chat-bubble bubble-user">
+          <div class="bubble-header">
+            <div class="user-avatar-sm">You</div>
+            <span class="bubble-sender">You</span>
+            <span class="bubble-tag">Requested Changes</span>
+            <span class="bubble-time">${item.timestamp}</span>
+          </div>
+          <div class="bubble-body-text">${escapeHtml(item.text)}</div>
+        </div>`;
+
+      // Paired agent response bubble
+      if (item.status === 'pending') {
+        html += `
+          <div class="chat-bubble bubble-agent bubble-typing">
+            <div class="bubble-header">
+              <div class="agent-avatar-sm" style="${agentStyle}">${agentSymbol}</div>
+              <span class="bubble-sender">${escapeHtml(agentName)}</span>
+              <span class="bubble-time">Just now</span>
+            </div>
+            <div class="typing-indicator">
+              <span class="typing-label">${escapeHtml(agentName)} is updating the plan</span>
+            </div>
+          </div>`;
+      } else {
+        const responseTime = item.addressedAt || item.timestamp;
+        const diff = item.diffSummary;
+        const note = item.agentNote;
+
+        html += `
+          <div class="chat-bubble bubble-agent bubble-response">
+            <div class="bubble-header">
+              <div class="agent-avatar-sm" style="${agentStyle}">${agentSymbol}</div>
+              <span class="bubble-sender">${escapeHtml(agentName)}</span>
+              <span class="bubble-time">${responseTime}</span>
+            </div>
+            <div class="bubble-response-content">
+              ${note ? `<div class="agent-authored-note">${escapeHtml(note)}</div>` : ''}
+              ${
+                diff
+                  ? `<div class="diff-metadata-row">
+                      <span>Plan modified:</span>
+                      <span class="diff-added">+${diff.added}</span> / <span class="diff-removed">-${diff.removed}</span> lines
+                      ${diff.headings.length ? `(sections: ${diff.headings.map(h => escapeHtml(h)).join(', ')})` : ''}
+                    </div>`
+                  : `<div class="diff-metadata-row">Plan was updated live by <strong>${escapeHtml(agentName)}</strong>.</div>`
+              }
+            </div>
+          </div>`;
+      }
+    });
+
+    // Section questions (highlighted text notes)
+    state.questions.forEach((q) => {
+      html += `
+        <div class="chat-bubble bubble-user bubble-question pill-note">
+          <div class="bubble-header">
+            <div class="user-avatar-sm" style="background: #f59e0b; color: #000;">Note</div>
+            <span class="bubble-sender" style="color: #d97706;">Text Note</span>
+            <span class="bubble-tag" style="background: rgba(245, 158, 11, 0.15); color: #d97706;">Snippet</span>
+            <button class="btn-delete-chat-item" onclick="deleteQuestion(${q.id})" title="Delete note">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="chat-quote">"${escapeHtml(q.quote)}"</div>
+          <div class="bubble-body-text">${escapeHtml(q.text)}</div>
+        </div>`;
+    });
+
+    html += '</div>';
+  }
+
   list.innerHTML = html;
-  list.scrollTop = list.scrollHeight;
 }
 
 window.deleteQuestion = function(id) {
@@ -878,24 +1270,11 @@ window.deleteQuestion = function(id) {
     parent.removeChild(mark);
   }
 
+  updateActionButtonsState();
   renderQuestionsSidebar();
 };
 
-async function saveMarkdownToServer() {
-  try {
-    const res = await fetch('/api/plan', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: state.content })
-    });
-    const data = await res.json();
-    if (data.success && data.fileVersion) {
-      state.fileVersion = data.fileVersion;
-    }
-  } catch (err) {
-    console.error('Failed to save markdown to server:', err);
-  }
-}
+window.scrollAndHighlight = scrollAndHighlight;
 
 function collectChoicesAndAnswers() {
   const choices = [];
@@ -946,7 +1325,6 @@ async function submitFeedback(status) {
       state.feedbackHistory.push(historyItem);
     }
 
-    // Clear the footer comment textarea immediately
     if (commentInput) {
       commentInput.value = '';
     }
@@ -971,7 +1349,6 @@ async function submitFeedback(status) {
 
     const data = await res.json();
     if (data.success) {
-      // Synchronize fileVersion from server response so client polling won't falsely trigger an agent update
       if (data.fileVersion) {
         state.fileVersion = data.fileVersion;
       }
@@ -989,10 +1366,6 @@ async function submitFeedback(status) {
       }
     }
   } catch (err) {
-    // The server most likely isn't reachable anymore (e.g. it was mid-exit,
-    // or a wait-timeout retry cycle hadn't reconnected yet). Roll back the
-    // optimistic history entry instead of leaving a "Waiting for agent
-    // response..." card for a submission that never actually went through.
     if (status === 'changes_requested') {
       state.feedbackHistory = state.feedbackHistory.filter((item) => item.status !== 'pending');
       renderQuestionsSidebar();
@@ -1027,9 +1400,10 @@ function closeTab() {
     window.top.close();
   } catch (e) {}
 
-  setTimeout(() => {
-    try {
-      window.location.href = 'about:blank';
-    } catch (e) {}
-  }, 150);
+  // If browser security blocks window.close(), do NOT redirect to about:blank.
+  // Instead, update the modal message so the user knows they can close the tab manually.
+  const modalMsg = document.getElementById('modalMessage');
+  if (modalMsg) {
+    modalMsg.textContent = 'Plan approved! You can close this browser tab or keep it open for reference.';
+  }
 }

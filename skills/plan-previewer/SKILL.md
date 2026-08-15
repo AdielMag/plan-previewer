@@ -13,12 +13,12 @@ Whenever writing or updating a markdown plan file (e.g. `plan.md`, `PLAN.md`), y
    ```bash
    npx plan-previewer ./plan.md --context="Brief task summary"
    ```
-   Do NOT run it in the background and do NOT try to poll for its completion some other way. Waiting for a foreground command to finish is a capability every agent harness has; background-task polling is not reliably supported everywhere, and using it here is what breaks this flow.
+   On **Claude Code** and **Pi CLI** this simply blocks in the foreground until the user submits feedback - let the tool call run to completion. Do NOT run it in the background and do NOT try to poll for its completion some other way. Waiting for a foreground command to finish is a capability every agent harness has; background-task polling is not reliably supported everywhere, and using it here is what breaks this flow.
 
 2. **CRITICAL: STOP & WAIT FOR THE COMMAND TO EXIT**
    - Do NOT execute any subsequent steps or tool calls while it is running.
    - Do NOT edit code or run further bash commands.
-   - The command exits on its own either when the user submits feedback (Request Changes or Approve) in the browser tab, **or** after a bounded wait (~4 minutes by default) with no decision yet — this second case is normal, not an error or a signal to give up. It exists because some agent harnesses cap how long a single command may run, shorter than a human typically takes to review a plan.
+   - The command exits on its own either when the user submits feedback (Request Changes or Approve) in the browser tab, **or** after a bounded wait with no decision yet — 4 minutes under Pi CLI, and on other harnesses whenever their own command timeout fires. This second case is normal, not an error or a signal to give up: it exists because a single command may not be allowed to run as long as a human takes to review a plan. Just re-run the same command.
 
 3. **Inspect Feedback & Act**
    - Once the command exits, check `.plan-feedback.json` (or `.plan-feedback.md`) next to the plan file.

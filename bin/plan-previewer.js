@@ -7,6 +7,7 @@ import http from 'http';
 import { spawn } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
 import pc from 'picocolors';
+import { resolveWaitTimeoutSec } from '../src/wait-timeout.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -77,6 +78,15 @@ function parseArgs() {
       options.context = arg.split('=').slice(1).join('=');
     } else if (arg === '-c' || arg === '--context') {
       options.context = args[++i];
+    } else if (arg.startsWith('--response=')) {
+      options.response = arg.split('=').slice(1).join('=');
+    } else if (arg === '-r' || arg === '--response') {
+      options.response = args[++i];
+    } else if (arg.startsWith('--response-file=')) {
+      const rFile = arg.split('=').slice(1).join('=');
+      try {
+        if (fs.existsSync(rFile)) options.response = fs.readFileSync(rFile, 'utf8').trim();
+      } catch (e) {}
     } else if (arg === '--help' || arg === '-h') {
       showHelp();
       process.exit(0);
@@ -95,6 +105,26 @@ function parseArgs() {
     }
   }
 
+  // Automatic pickup of .plan-response.md if --response was not explicitly set
+  if (!options.response) {
+    const planDir = filePath ? path.dirname(path.resolve(process.cwd(), filePath)) : process.cwd();
+    const autoResponseFiles = [
+      path.join(planDir, '.plan-response.md'),
+      path.join(process.cwd(), '.plan-response.md'),
+    ];
+    for (const rf of autoResponseFiles) {
+      if (fs.existsSync(rf)) {
+        try {
+          const text = fs.readFileSync(rf, 'utf8').trim();
+          if (text) {
+            options.response = text;
+            break;
+          }
+        } catch (e) {}
+      }
+    }
+  }
+
   return { filePath, options };
 }
 
@@ -106,9 +136,14 @@ ${pc.bold('Usage:')}
   npx plan-previewer [path-to-plan.md] [options]
 
 ${pc.bold('Options:')}
-  --agent=<claude|antigravity>  Explicitly override caller agent auto-detection
+  --agent=<claude|antigravity|pi>  Explicitly override caller agent auto-detection
   -p, --port=<number>           Specify local server port (default: 3456)
-  --wait-timeout=<seconds>      Max time to wait for a decision before exiting (default: 240).
+  --wait-timeout=<seconds>      Max time to wait for a decision before exiting.
+                                Default: 240 under Pi CLI (its bash tool has no
+                                timeout, so an unbounded wait would hang the turn);
+                                otherwise waits until the harness's own timeout.
+  -r, --response="<summary>"    Explain changes made in response to user requests
+  --response-file="<path>"      Read change response notes from a markdown file
   --no-open                     Do not automatically open browser tab
   -h, --help                    Show this help message
 `);
@@ -172,6 +207,7 @@ function spawnDetachedServer(filePath, options) {
   if (options.port) args.push(`--port=${options.port}`);
   if (options.context) args.push(`--context=${options.context}`);
   if (options.agent) args.push(`--agent=${options.agent}`);
+  if (options.response) args.push(`--response=${options.response}`);
   if (options.open === false) args.push('--no-open');
 
   const child = spawn(process.execPath, args, {
@@ -234,6 +270,7 @@ async function main() {
           filePath: absolutePath,
           context: options.context,
           agent: options.agent,
+          response: options.response,
           // If we just spawned this server ourselves, its own startup sequence
           // already opens the browser tab - opening again here would duplicate it.
           open: wasAlreadyRunning ? options.open : false,
@@ -243,7 +280,7 @@ async function main() {
       console.log(`${pc.bold('Target Plan:')} ${absolutePath}\n`);
     } catch (err) {}
 
-    const timeoutSec = Math.round((options.waitTimeoutMs || 24 * 60 * 60 * 1000) / 1000);
+    const timeoutSec = resolveWaitTimeoutSec(options);
     const data = await waitForFeedbackNative(port, timeoutSec, absolutePath);
 
     if (data && data.feedback) {
@@ -252,7 +289,12 @@ async function main() {
         `\n[PLAN-REVIEW]: status=${fb.status.toUpperCase()} | comment="${fb.comment || 'None'}" | saved=.plan-feedback.json\n`
       );
     } else {
-      console.log(pc.yellow('\nPlan previewer wait timeout completed.'));
+      console.log(
+        pc.yellow(
+          `\nPlan previewer wait timeout completed after ${timeoutSec}s - no decision submitted yet.` +
+            '\nThis is normal: re-run the exact same command to keep waiting (the open browser tab reconnects).'
+        )
+      );
     }
 
     try { fs.closeSync(1); } catch (e) {}

@@ -1,3 +1,4 @@
+import fs from 'fs';
 import path from 'path';
 import { startPlanPreviewer } from './server.js';
 
@@ -19,6 +20,13 @@ for (let i = 1; i < args.length; i++) {
     options.context = arg.split('=').slice(1).join('=');
   } else if (arg.startsWith('--agent=')) {
     options.agent = arg.split('=')[1];
+  } else if (arg.startsWith('--response=')) {
+    options.response = arg.split('=').slice(1).join('=');
+  } else if (arg.startsWith('--response-file=')) {
+    const rFile = arg.split('=').slice(1).join('=');
+    try {
+      if (fs.existsSync(rFile)) options.response = fs.readFileSync(rFile, 'utf8').trim();
+    } catch (e) {}
   }
 }
 

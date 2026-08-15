@@ -2,6 +2,39 @@ import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 
+const ENV_DETECTION_REASONS = {
+  pi: 'Pi CLI environment active',
+  claude: 'Claude Code environment active',
+  antigravity: 'Antigravity environment active',
+};
+
+/**
+ * Cheap, environment-variable-only agent detection.
+ *
+ * Kept separate from `detectCallerAgent` because that one may walk the parent
+ * process tree via PowerShell/ps, which costs seconds. Callers that just need a
+ * quick hint (e.g. choosing a default wait timeout on every CLI invocation)
+ * must not pay that cost.
+ *
+ * @param {NodeJS.ProcessEnv} [env] environment to inspect
+ * @returns {string|null} agent id, or null when no signal is present
+ */
+export function detectAgentIdFromEnv(env = process.env) {
+  // Pi is checked first: it exports unambiguous PI_* variables, while the model
+  // it happens to run (e.g. PI_MODEL=claude-opus-5) must never be mistaken for
+  // the host agent itself.
+  if (env.PI_CODING_AGENT || env.PI_SESSION_ID || (env.PI_MODEL && env.PI_PROVIDER)) {
+    return 'pi';
+  }
+  if (env.CLAUDE_CODE || env.CLAUDE_CONVERSATION_ID || env.CLAUDE_PROJECT_DIR) {
+    return 'claude';
+  }
+  if (env.ANTIGRAVITY_AGENT || env.AGY_VERSION || env.GEMINI_CONVERSATION_ID) {
+    return 'antigravity';
+  }
+  return null;
+}
+
 /**
  * Automatically detects or formats the caller agent for plan-previewer.
  * @param {object} options CLI options passed to plan-previewer
@@ -16,11 +49,9 @@ export function detectCallerAgent(options = {}) {
   const env = process.env;
 
   // 2. Direct Environment Variable Signals
-  if (env.CLAUDE_CODE || env.CLAUDE_CONVERSATION_ID || env.CLAUDE_PROJECT_DIR) {
-    return createAgentMeta('claude', 'Claude Code environment active');
-  }
-  if (env.ANTIGRAVITY_AGENT || env.AGY_VERSION || env.GEMINI_CONVERSATION_ID) {
-    return createAgentMeta('antigravity', 'Antigravity environment active');
+  const envAgentId = detectAgentIdFromEnv(env);
+  if (envAgentId) {
+    return createAgentMeta(envAgentId, ENV_DETECTION_REASONS[envAgentId]);
   }
 
   // 3. Parent Process Tree Inspection (PPID chain)
@@ -37,9 +68,27 @@ export function detectCallerAgent(options = {}) {
   if (parentCmd.includes('agy') || parentCmd.includes('antigravity')) {
     return createAgentMeta('antigravity', 'Antigravity binary caller detected');
   }
+  if (isPiBinary(parentCmd)) {
+    return createAgentMeta('pi', 'Pi binary caller detected');
+  }
 
   // Default fallback if running in standalone terminal
   return createAgentMeta('agent', 'Generic agent session');
+}
+
+/**
+ * Strict match for the Pi CLI executable. `pi` is a two-letter name, so a naive
+ * substring test would misfire on unrelated processes (pip, pipx, spinner,
+ * npm-pipe wrappers). Only an exact binary name - with or without a Windows
+ * extension, and with or without a leading path - counts.
+ * @param {string} value process name or command string
+ * @returns {boolean}
+ */
+function isPiBinary(value) {
+  if (!value) return false;
+  const first = String(value).trim().split(/\s+/)[0].toLowerCase();
+  const base = first.split(/[\\/]/).pop() || '';
+  return /^pi(\.exe|\.cmd|\.ps1|\.bat)?$/.test(base);
 }
 
 function inspectParentProcessTree() {
@@ -76,6 +125,14 @@ function inspectParentProcessTree() {
       }
 
       const fullStr = `${name} ${cmd}`.toLowerCase();
+
+      // Check for Pi CLI processes first - its executable name is only two
+      // characters, so it is matched strictly (exact binary name or the
+      // pi-coding-agent/pi-node install paths) rather than by substring,
+      // which would otherwise fire on words like "pip" or "spinner".
+      if (isPiBinary(name) || fullStr.includes('pi-coding-agent') || fullStr.includes('pi-node')) {
+        return { id: 'pi', reason: `Caller process tree includes ${name || 'pi'}` };
+      }
 
       // Check for Claude processes
       if (fullStr.includes('claude')) {
@@ -120,6 +177,18 @@ export function createAgentMeta(agentId, reason) {
       color: '#D97706',
       accentColor: '#F59E0B',
       icon: '🤖',
+      reason,
+    };
+  }
+  if (id === 'pi' || id === 'pi-cli') {
+    return {
+      id: 'pi',
+      name: 'Pi CLI',
+      subtitle: 'Pi Coding Agent',
+      badge: 'Pi CLI',
+      color: '#7C3AED',
+      accentColor: '#06B6D4',
+      icon: 'π',
       reason,
     };
   }

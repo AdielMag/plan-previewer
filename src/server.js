@@ -1,52 +1,41 @@
 import express from 'express';
-import fs from 'fs';
-import os from 'os';
 import path from 'path';
-import open from 'open';
-import pc from 'picocolors';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { spawn } from 'child_process';
+import pc from 'picocolors';
+import openBrowser from 'open';
 import { detectCallerAgent } from './detector.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// The `open` package launches the browser on Windows via a PowerShell
-// -EncodedCommand invocation that does not honor windowsHide, flashing a
-// visible console window every time. Launch it ourselves via `cmd /c start`
-// with windowsHide instead, so the tab opens without any console flash.
-async function openBrowser(url) {
-  if (process.platform === 'win32') {
-    spawn('cmd', ['/c', 'start', '""', url], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-    }).unref();
-    return;
-  }
-  return open(url);
-}
+const SESSION_MARKER_FILE = path.join(process.cwd(), '.plan-previewer-session.json');
 
-const ACTIVE_SESSION_MARKER = path.join(os.homedir(), '.plan-previewer', 'active-session.json');
-
-function writeActiveSessionMarker(planPath, port) {
+function writeActiveSessionMarker(planFilePath, port) {
   try {
-    fs.mkdirSync(path.dirname(ACTIVE_SESSION_MARKER), { recursive: true });
-    const feedbackJsonPath = path.join(path.dirname(planPath), '.plan-feedback.json');
-    fs.writeFileSync(
-      ACTIVE_SESSION_MARKER,
-      JSON.stringify({ feedbackJsonPath, planFile: planPath, port, pid: process.pid }, null, 2),
-      'utf8'
-    );
-  } catch (e) {}
+    const data = {
+      pid: process.pid,
+      port,
+      planFile: planFilePath,
+      startTime: new Date().toISOString(),
+    };
+    fs.writeFileSync(SESSION_MARKER_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {}
 }
 
 function clearActiveSessionMarker() {
   try {
-    if (fs.existsSync(ACTIVE_SESSION_MARKER)) fs.unlinkSync(ACTIVE_SESSION_MARKER);
-  } catch (e) {}
+    if (fs.existsSync(SESSION_MARKER_FILE)) {
+      fs.unlinkSync(SESSION_MARKER_FILE);
+    }
+  } catch (err) {}
 }
 
+/**
+ * Starts the Plan Previewer HTTP Server and opens browser.
+ * @param {string} filePath Relative or absolute path to markdown plan file.
+ * @param {object} options CLI options (port, open, agent, context, response)
+ */
 export async function startPlanPreviewer(filePath, options = {}) {
   let currentPlanPath = path.resolve(process.cwd(), filePath);
 
@@ -61,6 +50,9 @@ export async function startPlanPreviewer(filePath, options = {}) {
 
   const rawInitialContent = fs.readFileSync(currentPlanPath, 'utf8');
   let sessionContext = options.context || extractDerivedContext(rawInitialContent, currentPlanPath);
+  let agentResponses = options.response
+    ? [{ text: options.response.trim(), timestamp: new Date().toISOString(), fileVersion: 1 }]
+    : [];
 
   let fileVersion = 1;
   let selfWriteUntil = 0;
@@ -108,14 +100,19 @@ export async function startPlanPreviewer(filePath, options = {}) {
   let clientConnected = false;
   let exited = false;
   let pendingShutdownTimer = null;
+  let idleInterval = null;
 
   function exitOnce(reason) {
     if (exited) return;
     exited = true;
     if (pendingShutdownTimer) clearTimeout(pendingShutdownTimer);
+    if (idleInterval) clearInterval(idleInterval);
+    if (activeWatcher) {
+      try { activeWatcher.close(); } catch (e) {}
+      activeWatcher = null;
+    }
     clearActiveSessionMarker();
 
-    // Resolve any pending CLI waiters before exiting
     const waiters = [...pendingFeedbackWaiters];
     pendingFeedbackWaiters = [];
     waiters.forEach((waiter) => {
@@ -123,7 +120,7 @@ export async function startPlanPreviewer(filePath, options = {}) {
       try { waiter.res.json({ success: true, timeout: true, exit: true }); } catch (e) {}
     });
 
-    console.log(reason);
+    if (reason && !options.silent) console.log(reason);
 
     for (const socket of activeSockets) {
       try { socket.destroy(); } catch (e) {}
@@ -134,11 +131,13 @@ export async function startPlanPreviewer(filePath, options = {}) {
       try { server.close(); } catch (e) {}
     }
 
-    setTimeout(() => {
-      try { fs.closeSync(1); } catch (e) {}
-      try { fs.closeSync(2); } catch (e) {}
-      process.exit(0);
-    }, 200);
+    if (!options.testMode) {
+      setTimeout(() => {
+        try { fs.closeSync(1); } catch (e) {}
+        try { fs.closeSync(2); } catch (e) {}
+        process.exit(0);
+      }, 200);
+    }
   }
 
   function scheduleShutdown(reason, delayMs = 1500) {
@@ -161,11 +160,11 @@ export async function startPlanPreviewer(filePath, options = {}) {
     next();
   });
 
-  setInterval(() => {
-    if (clientConnected && Date.now() - lastHeartbeat > 7000) {
-      exitOnce(pc.yellow('\nBrowser window closed. Plan previewer shutting down.'));
+  idleInterval = setInterval(() => {
+    if (clientConnected && Date.now() - lastHeartbeat > 600000) {
+      exitOnce(pc.yellow('\nPlan previewer idle timeout completed. Shutting down.'));
     }
-  }, 3000);
+  }, 15000);
 
   // Status check endpoint for CLI single-instance verification
   app.get('/api/status', (req, res) => {
@@ -177,25 +176,30 @@ export async function startPlanPreviewer(filePath, options = {}) {
       planFile: currentPlanPath,
       sessionContext,
       callerAgent,
-      fileVersion
+      fileVersion,
+      agentResponses,
     });
   });
 
   // Notify endpoint for CLI callers to update plan file without starting duplicate server
   app.post('/api/notify', (req, res) => {
-    const { filePath, context, agent, open: shouldOpen } = req.body;
+    const { filePath, context, agent, response, open: shouldOpen } = req.body;
     if (filePath) {
       currentPlanPath = path.resolve(process.cwd(), filePath);
       attachWatcher(currentPlanPath);
     }
     if (context) sessionContext = context;
     if (agent) callerAgent = detectCallerAgent({ agent });
+    if (response && typeof response === 'string' && response.trim()) {
+      agentResponses.push({
+        text: response.trim(),
+        timestamp: new Date().toISOString(),
+        fileVersion: fileVersion + 1,
+      });
+    }
     fileVersion++;
     writeActiveSessionMarker(currentPlanPath, preferredPort);
 
-    // Only open a browser tab if this daemon hasn't already served one - a
-    // second CLI invocation reconnecting to an already-running daemon should
-    // never spawn a duplicate tab for the same session.
     if (shouldOpen !== false && preferredPort && !tabOpened) {
       tabOpened = true;
       try { openBrowser(`http://localhost:${preferredPort}`); } catch (e) {}
@@ -206,8 +210,6 @@ export async function startPlanPreviewer(filePath, options = {}) {
 
   // Long-polling feedback wait endpoint for CLI callers
   app.get('/api/wait-feedback', (req, res) => {
-    // Correlate this waiter to the plan file it was issued for, so an
-    // approval on one plan can never resolve a different plan's pending wait.
     const planFile = req.query.planFile ? path.resolve(req.query.planFile) : null;
     const waiter = { res, timer: null, planFile };
     const timeoutMs = parseInt(req.query.timeout, 10) * 1000 || 240000;
@@ -240,8 +242,8 @@ export async function startPlanPreviewer(filePath, options = {}) {
 
   app.get('/api/plan', (req, res) => {
     try {
-      const content = fs.readFileSync(currentPlanPath, 'utf8');
-      const currentStats = fs.statSync(currentPlanPath);
+      const content = fs.existsSync(currentPlanPath) ? fs.readFileSync(currentPlanPath, 'utf8') : '';
+      const currentStats = fs.existsSync(currentPlanPath) ? fs.statSync(currentPlanPath) : { mtime: new Date() };
       res.json({
         success: true,
         filename: path.basename(currentPlanPath),
@@ -252,6 +254,7 @@ export async function startPlanPreviewer(filePath, options = {}) {
         updatedAt: currentStats.mtime.toISOString(),
         callerAgent,
         sessionContext,
+        agentResponses,
       });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
@@ -303,9 +306,6 @@ export async function startPlanPreviewer(filePath, options = {}) {
 
       res.json({ success: true, fileVersion, message: 'Feedback transmitted back to agent successfully' });
 
-      // Resolve only the CLI waiters that were registered for this plan file -
-      // waiters for a different plan (e.g. reviewed concurrently on the same
-      // daemon) must keep waiting for their own feedback, not this one's.
       const [matching, remaining] = pendingFeedbackWaiters.reduce(
         (acc, waiter) => {
           acc[!waiter.planFile || waiter.planFile === currentPlanPath ? 0 : 1].push(waiter);
@@ -325,54 +325,73 @@ export async function startPlanPreviewer(filePath, options = {}) {
       const cCount = feedbackData.choices.length;
       console.log(`\n[PLAN-REVIEW]: status=${status.toUpperCase()} | comment="${comment || 'None'}" | questions=${qCount} | choices=${cCount} | saved=.plan-feedback.json\n`);
 
-      // Exit server ONLY when approved. Server stays alive for changes_requested!
       if (status === 'approved') {
         scheduleShutdown(pc.green('Plan approved by user. Server shutting down.'), 1500);
       }
-
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
   });
 
   const preferredPort = options.port || 3456;
-  server = app.listen(preferredPort, async () => {
-    trackSockets(server);
-    const port = server.address().port;
-    const url = `http://localhost:${port}`;
-    console.log(pc.bold(pc.cyan('\n🚀 Plan Previewer Daemon Active')));
-    console.log(`${pc.bold('Target Plan:')} ${currentPlanPath}`);
-    console.log(`${pc.bold('Caller Agent:')} ${pc.magenta(callerAgent.name)} (${callerAgent.reason})`);
-    console.log(`${pc.bold('Viewer URL:')} ${pc.underline(pc.blue(url))}\n`);
 
-    writeActiveSessionMarker(currentPlanPath, port);
-
-    if (options.open !== false) {
-      tabOpened = true;
-      try {
-        await openBrowser(url);
-      } catch (err) {
-        console.log(pc.yellow(`Please open ${url} in your browser.`));
+  return new Promise((resolve, reject) => {
+    server = app.listen(preferredPort, async () => {
+      trackSockets(server);
+      const port = server.address().port;
+      const url = `http://localhost:${port}`;
+      if (!options.silent) {
+        console.log(pc.bold(pc.cyan('\n Plan Previewer Daemon Active')));
+        console.log(`${pc.bold('Target Plan:')} ${currentPlanPath}`);
+        console.log(`${pc.bold('Caller Agent:')} ${pc.magenta(callerAgent.name)} (${callerAgent.reason})`);
+        console.log(`${pc.bold('Viewer URL:')} ${pc.underline(pc.blue(url))}\n`);
       }
-    }
-  });
 
-  server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-      server = app.listen(0, async () => {
-        trackSockets(server);
-        const dynamicPort = server.address().port;
-        const url = `http://localhost:${dynamicPort}`;
-        console.log(pc.bold(pc.cyan(`\n🚀 Plan Previewer Daemon Active on port ${dynamicPort}`)));
-        writeActiveSessionMarker(currentPlanPath, dynamicPort);
-        if (options.open !== false) {
-          tabOpened = true;
+      writeActiveSessionMarker(currentPlanPath, port);
+
+      if (options.open !== false) {
+        tabOpened = true;
+        try {
           await openBrowser(url);
+        } catch (err) {
+          console.log(pc.yellow(`Please open ${url} in your browser.`));
         }
+      }
+
+      resolve({
+        server,
+        app,
+        port,
+        close: () => exitOnce('Clean test close'),
       });
-    } else {
-      console.error(pc.red(`Server error: ${err.message}`));
-    }
+    });
+
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        server = app.listen(0, async () => {
+          trackSockets(server);
+          const dynamicPort = server.address().port;
+          const url = `http://localhost:${dynamicPort}`;
+          if (!options.silent) {
+            console.log(pc.bold(pc.cyan(`\n Plan Previewer Daemon Active on port ${dynamicPort}`)));
+          }
+          writeActiveSessionMarker(currentPlanPath, dynamicPort);
+          if (options.open !== false) {
+            tabOpened = true;
+            try { await openBrowser(url); } catch (e) {}
+          }
+          resolve({
+            server,
+            app,
+            port: dynamicPort,
+            close: () => exitOnce('Clean test close'),
+          });
+        });
+      } else {
+        if (!options.silent) console.error(pc.red(`Server error: ${err.message}`));
+        reject(err);
+      }
+    });
   });
 }
 
@@ -407,10 +426,10 @@ function generateFeedbackMarkdown(data) {
   }
 
   if (data.questions && data.questions.length > 0) {
-    md += `## Inline Questions & Context\n\n`;
+    md += `## Section Questions & Annotations\n\n`;
     data.questions.forEach((q, i) => {
       md += `### Question ${i + 1}\n`;
-      if (q.section) md += `> *Quote:* "${q.section}"\n\n`;
+      if (q.section) md += `> ${q.section}\n\n`;
       md += `**Question:** ${q.text}\n\n`;
     });
   }

@@ -12,7 +12,7 @@
     "start": "node ./bin/plan-previewer.js",
     "install-skills": "node ./scripts/install-skills.js",
     "postinstall": "node ./scripts/install-skills.js --auto",
-    "test": "node --test tests/detector.test.js"
+    "test": "node --test tests/"
   },
   "keywords": [
     "claude",

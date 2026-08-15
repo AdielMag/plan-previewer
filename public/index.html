@@ -23,15 +23,21 @@
 </head>
 <body>
 
-  <div class="app-layout">
+  <div class="app-layout" id="appLayout" data-width-mode="wide">
     
     <!-- Top Header -->
     <header class="top-header">
-      <div class="header-agent">
-        <div class="agent-avatar" id="agentAvatar">C</div>
-        <div class="agent-info">
-          <div class="agent-title" id="agentName">Claude Code</div>
-          <div class="agent-mode">Plan mode</div>
+      <div class="header-left-group">
+        <button class="icon-toggle-btn" id="btnToggleToc" title="Toggle Outline Sidebar (Ctrl+B)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+        </button>
+
+        <div class="header-agent">
+          <div class="agent-avatar" id="agentAvatar">C</div>
+          <div class="agent-info">
+            <div class="agent-title" id="agentName">Claude Code</div>
+            <div class="agent-mode">Plan mode</div>
+          </div>
         </div>
       </div>
 
@@ -53,10 +59,30 @@
       </div>
 
       <div class="header-right">
+        <!-- Width Mode Selector -->
+        <div class="width-toggle-group" id="widthToggleGroup" title="Change Document Layout Width">
+          <button class="width-btn" data-width="comfortable" title="Comfortable reading width (~880px)">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="4" x2="6" y2="20"/><line x1="18" y1="4" x2="18" y2="20"/><line x1="6" y1="12" x2="18" y2="12"/></svg>
+            <span>Narrow</span>
+          </button>
+          <button class="width-btn active" data-width="wide" title="Wide layout (75% screen width - optimal for code & tables)">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+            <span>Wide (75%)</span>
+          </button>
+          <button class="width-btn" data-width="full" title="Full screen width">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+            <span>Full</span>
+          </button>
+        </div>
+
         <button class="theme-toggle-btn" id="btnThemeToggle" title="Toggle Light/Dark Theme">
           <svg class="icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
           <svg class="icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
           <span id="themeLabelText">Light</span>
+        </button>
+
+        <button class="icon-toggle-btn" id="btnToggleActivity" title="Toggle Activity Sidebar">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
         </button>
 
         <button class="btn-close-session" id="btnHeaderClose" title="Close previewer">
@@ -88,8 +114,8 @@
 
       <!-- Scrollable Plan Document Center -->
       <div class="doc-scroll-area" id="docScrollArea">
-        <div class="doc-container">
-          <div class="doc-card">
+        <div class="doc-container" id="docContainer">
+          <div class="doc-card" id="docCard">
             <!-- Toast notification banner for live agent updates -->
             <div class="agent-toast-banner" id="agentToastBanner" style="display: none;">
               <span class="toast-icon">✨</span>
@@ -104,7 +130,7 @@
       </div>
 
       <!-- Right Feedback & Questions Sidebar -->
-      <aside class="questions-sidebar">
+      <aside class="questions-sidebar" id="questionsSidebar">
         <div class="sidebar-header">
           <span class="sidebar-title">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
