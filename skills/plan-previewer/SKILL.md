@@ -12,7 +12,7 @@ Plan Previewer has two distinct triggers - know which one applies before you lau
 
 ## Protocol (both phases)
 
-0. **Apply the `rich-plan-formatting` skill to the plan content first.** Before launching the previewer, structure the plan to be concise and human-readable first (with progressive disclosure via collapsible `<details>` blocks for low-level details, choice/question blocks, alert callouts, and status badges) - Plan Previewer renders these specially, and a bloated, unformatted plan defeats the point of reviewing it in this viewer.
+0. **Apply the `rich-plan-formatting` skill to the plan content first.** Before launching the previewer, structure the plan with two distinct text sections (`<!-- SUMMARY -->` for a 30-second executive digest, and `<!-- FULL -->` for the complete technical blueprint, along with choice/question blocks, alert callouts, and status badges) - Plan Previewer renders these as switchable views with tailored navigation.
 
 1. **Launch Previewer as a plain, blocking foreground command:**
    ```bash

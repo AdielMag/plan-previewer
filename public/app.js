@@ -121,7 +121,88 @@ function setViewMode(mode) {
   }
 
   updateViewModeButtons(mode);
-  applyCurrentViewMode();
+  renderMarkdown();
+}
+
+function extractPlanViews(content) {
+  if (!content || typeof content !== 'string') {
+    return { hasDualViews: false, summaryContent: '', fullContent: content || '' };
+  }
+
+  // Normalize newlines
+  const text = content.replace(/\r\n/g, '\n');
+
+  // 1. Check line-level comment delimiters: <!-- SUMMARY --> and <!-- FULL -->
+  const summaryStartIdx = text.search(/^[ \t]*<!--\s*(?:SECTION:\s*)?SUMMARY\s*-->[ \t]*$/im);
+  const fullStartIdx = text.search(/^[ \t]*<!--\s*(?:SECTION:\s*)?FULL\s*-->[ \t]*$/im);
+
+  if (summaryStartIdx !== -1 && fullStartIdx !== -1) {
+    let summaryContent = '';
+    let fullContent = '';
+
+    if (summaryStartIdx < fullStartIdx) {
+      const summarySlice = text.slice(summaryStartIdx);
+      const summaryAfterHeader = summarySlice.replace(/^[ \t]*<!--\s*(?:SECTION:\s*)?SUMMARY\s*-->[ \t]*\n/im, '');
+      const summaryEndMatch = summaryAfterHeader.search(/^[ \t]*<!--\s*(?:\/|END\s+|END_)(?:SECTION:\s*)?SUMMARY\s*-->[ \t]*$/im);
+
+      if (summaryEndMatch !== -1) {
+        summaryContent = summaryAfterHeader.slice(0, summaryEndMatch).trim();
+      } else {
+        const fullRelIdx = summaryAfterHeader.search(/^[ \t]*<!--\s*(?:SECTION:\s*)?FULL\s*-->[ \t]*$/im);
+        summaryContent = fullRelIdx !== -1 ? summaryAfterHeader.slice(0, fullRelIdx).trim() : summaryAfterHeader.trim();
+      }
+
+      const fullSlice = text.slice(fullStartIdx);
+      const fullAfterHeader = fullSlice.replace(/^[ \t]*<!--\s*(?:SECTION:\s*)?FULL\s*-->[ \t]*\n/im, '');
+      const fullEndMatch = fullAfterHeader.search(/^[ \t]*<!--\s*(?:\/|END\s+|END_)(?:SECTION:\s*)?FULL\s*-->[ \t]*$/im);
+
+      fullContent = fullEndMatch !== -1 ? fullAfterHeader.slice(0, fullEndMatch).trim() : fullAfterHeader.trim();
+    } else {
+      const fullSlice = text.slice(fullStartIdx);
+      const fullAfterHeader = fullSlice.replace(/^[ \t]*<!--\s*(?:SECTION:\s*)?FULL\s*-->[ \t]*\n/im, '');
+      const fullEndMatch = fullAfterHeader.search(/^[ \t]*<!--\s*(?:\/|END\s+|END_)(?:SECTION:\s*)?FULL\s*-->[ \t]*$/im);
+      fullContent = fullEndMatch !== -1 ? fullAfterHeader.slice(0, fullEndMatch).trim() : fullAfterHeader.trim();
+
+      const summarySlice = text.slice(summaryStartIdx);
+      const summaryAfterHeader = summarySlice.replace(/^[ \t]*<!--\s*(?:SECTION:\s*)?SUMMARY\s*-->[ \t]*\n/im, '');
+      const summaryEndMatch = summaryAfterHeader.search(/^[ \t]*<!--\s*(?:\/|END\s+|END_)(?:SECTION:\s*)?SUMMARY\s*-->[ \t]*$/im);
+      summaryContent = summaryEndMatch !== -1 ? summaryAfterHeader.slice(0, summaryEndMatch).trim() : summaryAfterHeader.trim();
+    }
+
+    return {
+      hasDualViews: true,
+      summaryContent,
+      fullContent
+    };
+  }
+
+  // 2. Check data-view attributes: <div data-view="summary">...</div> and <div data-view="full">...</div>
+  const summaryDivMatch = text.match(/<(?:div|section)[^>]*data-view=["']summary["'][^>]*>([\s\S]*?)<\/(?:div|section)>/i);
+  const fullDivMatch = text.match(/<(?:div|section)[^>]*data-view=["']full["'][^>]*>([\s\S]*?)<\/(?:div|section)>/i);
+
+  if (summaryDivMatch && fullDivMatch) {
+    return {
+      hasDualViews: true,
+      summaryContent: summaryDivMatch[1].trim(),
+      fullContent: fullDivMatch[1].trim()
+    };
+  }
+
+  // Single-view fallback
+  return {
+    hasDualViews: false,
+    summaryContent: content,
+    fullContent: content
+  };
+}
+
+function getActiveViewMarkdown(rawMarkdown) {
+  const views = extractPlanViews(rawMarkdown);
+  state.hasDualViews = views.hasDualViews;
+  if (!views.hasDualViews) {
+    return rawMarkdown;
+  }
+  return state.viewMode === 'summary' ? views.summaryContent : views.fullContent;
 }
 
 function applyCurrentViewMode() {
@@ -130,44 +211,58 @@ function applyCurrentViewMode() {
     layout.setAttribute('data-view-mode', state.viewMode);
   }
 
+  const isSummary = state.viewMode === 'summary';
+  const banner = document.getElementById('summaryModeBanner');
+  if (banner) {
+    const textEl = banner.querySelector('.summary-banner-left span');
+    if (textEl) {
+      if (state.hasDualViews) {
+        textEl.innerHTML = '<strong>Executive Summary:</strong> Showing concise high-level plan. Switch to Full Plan for technical specs & code.';
+      } else {
+        textEl.innerHTML = '<strong>Summary View:</strong> Showing high-level strategy, decisions & milestones.';
+      }
+    }
+  }
+
   const container = document.getElementById('renderedOutput');
   if (!container) return;
 
-  const isSummary = state.viewMode === 'summary';
+  // In legacy single-view plans without separate text sections:
+  if (!state.hasDualViews) {
+    // 1. Details accordions: close in summary, open in full
+    container.querySelectorAll('details').forEach((d) => {
+      if (isSummary) {
+        d.removeAttribute('open');
+      } else {
+        d.setAttribute('open', '');
+      }
+    });
 
-  // 1. Details accordions: close in summary, open in full
-  container.querySelectorAll('details').forEach((d) => {
-    if (isSummary) {
-      d.removeAttribute('open');
-    } else {
-      d.setAttribute('open', '');
-    }
-  });
+    // 2. Code blocks: collapse in summary, expand in full
+    container.querySelectorAll('.code-block-wrapper.is-long').forEach((wrapper) => {
+      const btn = wrapper.querySelector('.btn-expand-code span');
+      const svg = wrapper.querySelector('.btn-expand-code svg');
+      if (isSummary) {
+        wrapper.classList.add('code-collapsed');
+        if (btn) btn.textContent = 'Show more lines';
+        if (svg) svg.style.transform = 'rotate(0deg)';
+      } else {
+        wrapper.classList.remove('code-collapsed');
+        if (btn) btn.textContent = 'Show less';
+        if (svg) svg.style.transform = 'rotate(180deg)';
+      }
+    });
 
-  // 2. Code blocks: collapse in summary, expand in full
-  container.querySelectorAll('.code-block-wrapper.is-long').forEach((wrapper) => {
-    const btn = wrapper.querySelector('.btn-expand-code span');
-    const svg = wrapper.querySelector('.btn-expand-code svg');
-    if (isSummary) {
-      wrapper.classList.add('code-collapsed');
-      if (btn) btn.textContent = 'Show more lines';
-      if (svg) svg.style.transform = 'rotate(0deg)';
-    } else {
-      wrapper.classList.remove('code-collapsed');
-      if (btn) btn.textContent = 'Show less';
-      if (svg) svg.style.transform = 'rotate(180deg)';
-    }
-  });
-
-  // 3. Sub-sections (H3): collapse in summary, expand in full
-  container.querySelectorAll('h3').forEach((h3) => {
-    h3.classList.toggle('section-collapsed', isSummary);
-    let curr = h3.nextElementSibling;
-    while (curr && !['H1', 'H2', 'H3'].includes(curr.tagName.toUpperCase())) {
-      curr.classList.toggle('section-node-hidden', isSummary);
-      curr = curr.nextElementSibling;
-    }
-  });
+    // 3. Sub-sections (H3): collapse in summary, expand in full
+    container.querySelectorAll('h3').forEach((h3) => {
+      h3.classList.toggle('section-collapsed', isSummary);
+      let curr = h3.nextElementSibling;
+      while (curr && !['H1', 'H2', 'H3'].includes(curr.tagName.toUpperCase())) {
+        curr.classList.toggle('section-node-hidden', isSummary);
+        curr = curr.nextElementSibling;
+      }
+    });
+  }
 }
 
 function collapseAllSections() {
@@ -665,19 +760,21 @@ async function renderMarkdown() {
     }
   }
 
+  const activeMarkdown = getActiveViewMarkdown(state.content);
+
   let rawHtml = '';
   if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
     try {
       if (typeof marked.setOptions === 'function') {
         marked.setOptions({ gfm: true, breaks: false });
       }
-      rawHtml = marked.parse(state.content);
+      rawHtml = marked.parse(activeMarkdown);
     } catch (e) {
       console.warn('Marked.js error, falling back:', e);
-      rawHtml = simpleMarkdownParse(state.content);
+      rawHtml = simpleMarkdownParse(activeMarkdown);
     }
   } else {
-    rawHtml = simpleMarkdownParse(state.content);
+    rawHtml = simpleMarkdownParse(activeMarkdown);
   }
 
   output.innerHTML = rawHtml;

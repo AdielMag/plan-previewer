@@ -23,7 +23,7 @@ Plan Previewer has two distinct triggers - know which one applies before you lau
 
 ## Protocol (both phases)
 
-0. Apply the \`rich-plan-formatting\` skill to the plan content first - keep it concise and human-readable first with progressive disclosure (collapsible deep-dives for low-level details), choice/question blocks, alert callouts, and status badges before launching the previewer.
+0. Apply the \`rich-plan-formatting\` skill to the plan content first - structure it with two distinct text sections (\`<!-- SUMMARY -->\` for a 30-second executive scan, and \`<!-- FULL -->\` for the complete technical blueprint, along with choice/question blocks, alert callouts, and status badges) before launching the previewer.
 1. Run \`npx plan-previewer <path-to-plan> --context="<task summary>"\` in terminal as a plain command.
    - On **Claude Code** and **Pi CLI**: the command blocks in the foreground until feedback is submitted - simply let it run to completion.
    - On **Antigravity AGY**: If \`run_command\` sends the command to a background task, simply stop calling tools to end your turn. The installed \`Stop\` hook intercepts the execution loop's termination and automatically resumes the session with the result the instant feedback is submitted - no extra tool call is needed.

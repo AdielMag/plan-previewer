@@ -1,58 +1,58 @@
 :root {
-  /* Warm Editorial Light Theme (per approved design handoff) */
-  --bg-app: #f6f3ee;
+  /* Warm Editorial Light Theme — High Contrast & Elevated Layering */
+  --bg-app: #ede8df;
   --bg-ambient-gradient: none;
-  --bg-header: #fffdfa;
-  --bg-header-border: #e3ddd2;
-  --bg-card: #fffdfa;
-  --bg-card-border: #e3ddd2;
-  --bg-card2: #f3efe8;
-  --bg-sidebar: #efeae1;
-  --bg-sidebar-border: #e3ddd2;
-  --bg-code: #f3efe8;
-  --bg-code-border: #cec6b8;
-  --bg-callout: #f3efe8;
-  --bg-details: #f3efe8;
-  --bg-details-border: #cec6b8;
-  --bg-details-summary-hover: #ece5d9;
-  --bg-footer: #fffdfa;
-  --bg-footer-border: #e3ddd2;
-  --bg-input: #fffdfa;
-  --bg-input-border: #cec6b8;
+  --bg-header: #ffffff;
+  --bg-header-border: #d8d0c2;
+  --bg-card: #ffffff;
+  --bg-card-border: #d8d0c2;
+  --bg-card2: #f6f3eb;
+  --bg-sidebar: #e5dfd4;
+  --bg-sidebar-border: #d8d0c2;
+  --bg-code: #f2eee5;
+  --bg-code-border: #cdc3b3;
+  --bg-callout: #f7f4ec;
+  --bg-details: #f6f3eb;
+  --bg-details-border: #cdc3b3;
+  --bg-details-summary-hover: #ece6dc;
+  --bg-footer: #ffffff;
+  --bg-footer-border: #d8d0c2;
+  --bg-input: #ffffff;
+  --bg-input-border: #cdc3b3;
 
-  --border-color: #e3ddd2;      /* bd */
-  --border-strong: #cec6b8;     /* bd2 */
+  --border-color: #d8d0c2;      /* bd */
+  --border-strong: #c2b7a4;     /* bd2 */
 
-  --text-primary: #1c1917;      /* tp */
-  --text-secondary: #3f3a34;    /* ts */
-  --text-muted: #78716a;        /* tm */
-  --text-inverse: #fffdfa;
+  --text-primary: #12100e;      /* Deep rich ink black */
+  --text-secondary: #2c2723;    /* Deep warm charcoal */
+  --text-muted: #6b6358;        /* Clear, legible neutral */
+  --text-inverse: #ffffff;
 
-  --accent-color: #b4700f;      /* ac */
-  --accent-hover: #8f5709;      /* ac-h */
-  --accent-light: rgba(180, 112, 15, 0.10);
+  --accent-color: #b86800;      /* Rich amber */
+  --accent-hover: #965300;      /* Deep amber */
+  --accent-light: rgba(184, 104, 0, 0.12);
 
-  --shadow-sm: none;
-  --shadow-md: none;
-  --shadow-lg: none;
+  --shadow-sm: 0 1px 2px 0 rgba(28, 25, 23, 0.05);
+  --shadow-md: 0 4px 14px -2px rgba(28, 25, 23, 0.07), 0 1px 3px rgba(28, 25, 23, 0.04);
+  --shadow-lg: 0 12px 32px -4px rgba(28, 25, 23, 0.09), 0 2px 6px rgba(28, 25, 23, 0.04);
 
   /* Semantic accent colors (violet/amber/cyan/green/red/blue) */
-  --violet: #5b62c4;
-  --violet-light: rgba(91, 98, 196, 0.10);
-  --amber: #b4700f;
-  --amber-light: rgba(180, 112, 15, 0.12);
-  --cyan: #0f7f6e;
-  --cyan-light: rgba(15, 127, 110, 0.10);
-  --green: #4c8a37;
-  --green-light: rgba(76, 138, 55, 0.10);
-  --red: #bf4038;
-  --red-light: rgba(191, 64, 56, 0.10);
-  --blue: #5b62c4;
-  --blue-light: rgba(91, 98, 196, 0.10);
+  --violet: #4f56c0;
+  --violet-light: rgba(79, 86, 192, 0.12);
+  --amber: #b86800;
+  --amber-light: rgba(184, 104, 0, 0.14);
+  --cyan: #0c7867;
+  --cyan-light: rgba(12, 120, 103, 0.12);
+  --green: #2e7d32;
+  --green-light: rgba(46, 125, 50, 0.13);
+  --red: #c62828;
+  --red-light: rgba(198, 40, 40, 0.13);
+  --blue: #4f56c0;
+  --blue-light: rgba(79, 86, 192, 0.12);
 
-  --status-review-color: var(--blue);
-  --status-review-bg: var(--blue-light);
-  --status-review-border: var(--blue);
+  --status-review-color: var(--amber);
+  --status-review-bg: var(--amber-light);
+  --status-review-border: var(--amber);
 
   --status-approved-color: var(--green);
   --status-approved-bg: var(--green-light);
@@ -739,23 +739,15 @@ a:hover {
    Summary Mode Transformation (Executive Human-Readable Digest)
    ========================================================================== */
 
-/* In Summary View, completely hide low-level details accordions, code blocks, complex tables, and diagrams */
-[data-view-mode="summary"] details.styled-details,
-[data-view-mode="summary"] .code-block-wrapper,
-[data-view-mode="summary"] pre:not(.mermaid),
-[data-view-mode="summary"] table {
-  display: none !important;
-}
-
 /* Enhanced padding, boldness, and text clarity in Summary Mode */
 [data-view-mode="summary"] .doc-card {
-  padding: 44px 54px;
+  padding: 42px 50px;
 }
 
 [data-view-mode="summary"] .md-body h1 {
   font-size: 26px;
-  font-weight: 800;
-  letter-spacing: -0.03em;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   margin-top: 0.2em;
   margin-bottom: 0.8em;
 }
@@ -763,11 +755,11 @@ a:hover {
 [data-view-mode="summary"] .md-body h2 {
   font-size: 19px;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.015em;
   margin-top: 1.8em;
   margin-bottom: 0.8em;
   padding-bottom: 8px;
-  border-bottom: 1.5px solid var(--bg-card-border);
+  border-bottom: 1.5px solid var(--border-color);
 }
 
 [data-view-mode="summary"] .md-body p {

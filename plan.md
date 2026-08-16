@@ -1,95 +1,127 @@
-# Plan Previewer: Human-Readable Progressive Disclosure & Visual Polish
+<!-- SUMMARY -->
+# Plan Previewer: Dual-View Architecture (Summary & Full)
 
 > [!NOTE]
-> **Executive Summary**: Upgraded Plan Previewer to prioritize human readability with a 30-second scanning experience by default. Deep technical details, long code snippets, and verification suites are organized into sleek, collapsible accordion cards with high-contrast executive summaries and choice blocks.
+> **Executive Summary**: Upgraded Plan Previewer so agents author two distinct text views: a **Summary View** (30-second executive scan with high-level strategy, decisions, and milestones) and a **Full View** (in-depth engineering specification with architecture diagrams, schema migrations, and code diffs).
 
 ---
 
-## High-Level Architecture & Strategy
+## Key Decisions
 
-- **Progressive Disclosure**: High-level strategy and key decisions are immediately visible on canvas; low-level implementation details are tucked into styled `<details>` accordions.
-- **Dual View Modes**: Switch between **Summary Mode** (compact 30-second scan) and **Full Mode** (all details expanded) with one click in the top header.
-- **Ultra-Clean Theme Palette**: Ultra-clean GitHub/Vercel/Linear design palette for both Light and Dark modes with zero background visual noise and crisp text contrast.
+> [!CHOICE] Default Initial View
+> **Question**: Which view mode should Plan Previewer present first when opening a plan?
+> - (x) **Option A**: Summary View (Clean 30-second executive digest) [Recommended]
+> - ( ) **Option B**: Full View (Complete engineering specifications and code)
+
+> [!CHOICE] Section Delimiter Syntax
+> **Question**: Which delimiter syntax feels most natural for agents writing dual-view markdown plans?
+> - (x) **Option A**: `<!-- SUMMARY -->` and `<!-- FULL -->` comments [Recommended]
+> - ( ) **Option B**: `<div data-view="summary">` and `<div data-view="full">` HTML tags
+
+> [!QUESTION] Additional Section Suggestions
+> **Question**: Are there any additional specialized views or metadata you would like supported in future releases?
+
+---
+
+## High-Level Milestones
+
+- [x] 1. Add `extractPlanViews()` parser to extract separate Summary and Full texts
+- [x] 2. Wire Header View Mode toggle (`Summary` vs `Full`) to switch active text document
+- [x] 3. Generate independent Outline (TOC) sidebar specifically for the active view
+- [x] 4. Update `rich-plan-formatting` and `plan-previewer` skills with dual-view guidelines
+- [x] 5. Verify all tests pass and live polling syncs across views
+<!-- /SUMMARY -->
+
+<!-- FULL -->
+# Plan Previewer: Dual-View Architecture (Full Specification)
+
+## 1. Objective & Motivation
+Human reviewers need to scan plans in 30 seconds to understand the big picture and make architectural decisions without being overwhelmed by hundreds of lines of code diffs, database migrations, and edge-case specifications. At the same time, when executing or conducting deep technical reviews, the full engineering specification must be preserved in the exact same plan file.
+
+Instead of merely hiding DOM elements via CSS, Plan Previewer now supports **two distinct textual views** authored directly in the plan markdown file:
+1. `<!-- SUMMARY --> ... <!-- /SUMMARY -->`: The executive digest.
+2. `<!-- FULL --> ... <!-- /FULL -->`: The comprehensive engineering blueprint.
+
+---
+
+## 2. System Architecture & Lifecycle
 
 ```mermaid
-graph LR
-    A[Agent Generates Plan] --> B[30-Sec Summary View]
-    B --> C{Review Decisions}
-    C -->|Need Deep Dive?| D[Expand Collapsible Accordions]
-    C -->|Approved?| E[Instant Execution]
+graph TD
+    Agent[Agent Creates Plan] --> WriteDual[Writes Dual-View Markdown]
+    WriteDual --> Launch[Launch Plan Previewer]
+    Launch --> Extractor[extractPlanViews Parser]
+    Extractor -->|Summary Mode Active| RenderSummary[Render Summary Markdown + TOC]
+    Extractor -->|Full Mode Active| RenderFull[Render Full Markdown + TOC]
+    RenderSummary <-->|User Toggles View Mode| RenderFull
+    RenderSummary --> UserReview{User Reviews & Decides}
+    RenderFull --> UserReview
+    UserReview -->|Feedback Submitted| WriteFeedback[.plan-feedback.json Written]
 ```
 
 ---
 
-## Key Decisions & Options
+## 3. Decisions & Options
 
-> [!CHOICE] Default View Density Mode
-> **Question**: Which view mode should Plan Previewer open with by default for new plans?
-> - (x) **Option A**: Summary View (Collapses `<details>` deep-dives by default for 30-second quick scanning) [Recommended]
-> - ( ) **Option B**: Full View (Expands all accordions and code blocks on launch)
+> [!CHOICE] Default Initial View
+> **Question**: Which view mode should Plan Previewer present first when opening a plan?
+> - (x) **Option A**: Summary View (Clean 30-second executive digest) [Recommended]
+> - ( ) **Option B**: Full View (Complete engineering specifications and code)
 
-> [!CHOICE] Theme & Color Scheme
-> **Question**: How does this ultra-clean modern palette (GitHub/Vercel crisp contrast) look and feel?
-> - (x) **Option A**: Great — clean, high-contrast, comfortable for long reading [Recommended]
-> - ( ) **Option B**: Needs Further Adjustment
+> [!CHOICE] Section Delimiter Syntax
+> **Question**: Which delimiter syntax feels most natural for agents writing dual-view markdown plans?
+> - (x) **Option A**: `<!-- SUMMARY -->` and `<!-- FULL -->` comments [Recommended]
+> - ( ) **Option B**: `<div data-view="summary">` and `<div data-view="full">` HTML tags
 
-> [!QUESTION] Additional Customization Ideas
-> **Question**: Are there any additional layout or interaction features you would like added to the viewer?
-
----
-
-## Execution Milestones
-
-- [x] 1. Implement progressive disclosure skill (`rich-plan-formatting`)
-- [x] 2. Add Summary vs Full view switcher in header with section folding
-- [x] 3. Style `<details>` and `<summary>` accordions with smooth rotating chevrons & badges
-- [x] 4. Fix choice card selection persistence bug on re-render / feedback submission
-- [x] 5. Fix agent waiting typing indicator to only dismiss when agent actually updates plan
-- [x] 6. Polish Light & Dark theme palettes for high readability
-- [x] 7. Add SVG favicon to browser tab
+> [!QUESTION] Additional Section Suggestions
+> **Question**: Are there any additional specialized views or metadata you would like supported in future releases?
 
 ---
 
-<details>
-<summary>🔍 Deep Dive: Architecture & Implementation Details</summary>
-
-### Progressive Disclosure System
-1. **Zero-DOM Mutation Design**: Retains native DOM structure so text selection, question popovers, and interactive radio choices remain 100% reliable.
-2. **Choice Card State Persistence**: Restores selected radio buttons and draft question answers from session memory across re-renders and change requests.
-3. **Smart Polling & Typing Indicator**: Tracks actual file content diffs and agent response timestamps so the typing indicator stays active while the agent works and only marks requests as addressed when updates land.
+## 4. Technical Implementation Details
 
 ```javascript
-// Example: View mode toggle logic
-function applyCurrentViewMode() {
-  const container = document.getElementById('renderedOutput');
-  const isSummary = state.viewMode === 'summary';
-  container.querySelectorAll('details').forEach(d => {
-    if (isSummary) d.removeAttribute('open');
-    else d.setAttribute('open', '');
-  });
+// Parser logic in public/app.js
+function extractPlanViews(content) {
+  if (!content || typeof content !== 'string') {
+    return { hasDualViews: false, summaryContent: '', fullContent: content || '' };
+  }
+
+  const summaryMatch = content.match(/<!--\s*(?:SECTION:\s*)?SUMMARY(?:_START)?\s*-->([\s\S]*?)<!--\s*(?:\/|END\s+|END_)?(?:SECTION:\s*)?SUMMARY(?:_END)?\s*-->/i);
+  const fullMatch = content.match(/<!--\s*(?:SECTION:\s*)?FULL(?:_START)?\s*-->([\s\S]*?)<!--\s*(?:\/|END\s+|END_)?(?:SECTION:\s*)?FULL(?:_END)?\s*-->/i);
+
+  if (summaryMatch && fullMatch) {
+    return {
+      hasDualViews: true,
+      summaryContent: summaryMatch[1].trim(),
+      fullContent: fullMatch[1].trim()
+    };
+  }
+
+  return { hasDualViews: false, summaryContent: content, fullContent: content };
 }
 ```
-</details>
 
-<details>
-<summary>📁 File Changes Summary (5 files)</summary>
+---
 
-- `public/styles.css` `[MODIFY]`: Refined color variables for light and dark themes, styled `<details>` & code blocks.
-- `public/app.js` `[MODIFY]`: Added view switcher, details processing, choice selection restoration, and accurate polling.
-- `public/index.html` `[MODIFY]`: Added View Mode controls and SVG tab favicon link.
-- `public/favicon.svg` `[NEW]`: Custom vector favicon for browser tab.
-- `skills/rich-plan-formatting/SKILL.md` `[MODIFY]`: Standardized progressive disclosure guidelines.
-</details>
+## 5. File Changes
 
-<details>
-<summary>🧪 Verification & Automated Test Suite</summary>
+| File | Action | Description |
+|---|---|---|
+| `public/app.js` | `[MODIFY]` | Added `extractPlanViews()`, dynamic view re-rendering, and independent TOC generation |
+| `skills/rich-plan-formatting/SKILL.md` | `[MODIFY]` | Added dual-text structure protocol and examples |
+| `skills/plan-previewer/SKILL.md` | `[MODIFY]` | Documented dual-view authoring requirement in agent workflow |
+| `src/rule-block.js` | `[MODIFY]` | Updated global agent instructions to require dual-view structure |
+| `README.md` | `[MODIFY]` | Added dual-view documentation and delimiter specifications |
 
-- Run full test suite: `npm test` (38 passing tests)
-- Verification checklist:
-  - Theme toggle (Light/Dark mode contrast)
-  - View mode toggle (Summary / Full)
-  - Choice selection persistence
-  - Agent response waiting indicator
-  - Copy button functionality on code blocks
-  - Browser tab SVG favicon rendering
-</details>
+---
+
+## 6. Verification & Automated Test Suite
+
+- Run test suite: `npm test`
+- Verification checkpoints:
+  - Switching between Summary and Full modes re-renders the appropriate text section.
+  - Outline (TOC) sidebar dynamically updates to show headings from the active view.
+  - Selections in Decisions Tray persist across view switches.
+  - Single-view plans (without delimiter tags) gracefully render across both view modes.
+<!-- /FULL -->

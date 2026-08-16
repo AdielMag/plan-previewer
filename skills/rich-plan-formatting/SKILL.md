@@ -1,92 +1,135 @@
 ---
 name: rich-plan-formatting
-description: MANDATORY. Apply whenever creating or updating a plan markdown file (plan.md/PLAN.md) shown in Plan Previewer - structure it to be concise, human-readable first, with progressive disclosure (collapsible deep-dives for low-level details), choice/question blocks, alert callouts, and status badges.
+description: MANDATORY. Apply whenever creating or updating a plan markdown file (plan.md/PLAN.md) shown in Plan Previewer - structure it with two distinct text sections (<!-- SUMMARY --> and <!-- FULL -->), choice/question blocks, alert callouts, and status badges.
 ---
 
-# Rich Plan Formatting Guide: Human-Readable First
+# Rich Plan Formatting Guide: Dual-View Architecture (Summary & Full)
 
-When authoring execution plans (such as `plan.md` or `PLAN.md`), your goal is **maximum human readability with progressive disclosure**. 
+When authoring execution plans (such as `plan.md` or `PLAN.md`), you MUST structure the file into **two distinct text sections**:
+1. **Summary View (`<!-- SUMMARY --> ... <!-- /SUMMARY -->`)**: A concise, 30-second executive scan containing high-level strategy, key trade-off decisions, and high-level milestones.
+2. **Full View (`<!-- FULL --> ... <!-- /FULL -->`)**: The comprehensive engineering specification containing architectural diagrams, schema migrations, step-by-step implementation breakdowns, file diff tables, and verification suites.
 
-> [!IMPORTANT]
-> **The 30-Second Rule**: A human reviewer must be able to scan and understand the **Goal**, **Key Decisions**, and **High-Level Strategy** in under 30 seconds without wading through walls of code or verbose paragraphs.
->
-> Put deep implementation details, long file diffs, command sequences, and exhaustive edge cases inside **collapsible `<details>` blocks**!
+Plan Previewer automatically parses these two sections and lets the user switch between **Summary Mode** and **Full Mode** with independent outline navigation (TOC).
 
 ---
 
-## 1. Plan Structure Template
+## 1. Dual-View Plan Template
 
-Follow this standardized, clean structure:
+Always format your plans using this standardized dual-view template:
 
 ```markdown
-# [Short Descriptive Title]
+<!-- SUMMARY -->
+# [Project Name / Task Title] (Executive Summary)
 
 > [!NOTE]
-> **Executive Summary / Goal**: 1–2 sentences explaining what is being built or fixed and why.
+> **Executive Summary**: 1–2 sentences explaining what is being built or fixed, key trade-offs, and estimated effort.
 
-## Strategy & Approach
-- **Core concept**: Brief 1-2 sentence description.
-- **Key milestones**: High-level stages (3–5 bullets max).
+## High-Level Strategy & Architecture
+- **Core Concept**: Brief 1-2 sentence description of the solution.
+- **Key Milestones**: 3–5 bullet summary of execution stages.
 
-> [!CHOICE] Key Decision Block (if trade-offs exist)
+## Key Decisions
+
+> [!CHOICE] Key Architectural Decision
 > **Question**: Which approach should we take for X?
-> - (x) **Option A**: Approach 1 [Recommended]
-> - ( ) **Option B**: Approach 2
+> - (x) **Option A**: Approach 1 (Fast, reliable, standard) [Recommended]
+> - ( ) **Option B**: Approach 2 (Custom, flexible)
+
+> [!QUESTION] Requirement Clarification
+> **Question**: Are there any specific constraints on Y we should adhere to?
 
 ## Execution Milestones
-- [ ] 1. Core architecture & setup
-- [ ] 2. Implementation of primary modules
-- [ ] 3. Tests & verification
+- [ ] 1. Foundation & core abstractions
+- [ ] 2. Primary service implementation
+- [ ] 3. End-to-end verification & tests
+<!-- /SUMMARY -->
 
-<details>
-<summary>🔍 Deep Dive: Technical Implementation Details</summary>
+<!-- FULL -->
+# [Project Name / Task Title] (Full Specification)
 
-### Step-by-Step Breakdown
+## 1. Objective & Background
+Comprehensive context explaining why this change is necessary, current latency/error metrics, service boundaries, and dependencies.
+
+## 2. Architecture & Component Flow
+
+```mermaid
+graph TD
+    A[Client Request] --> B[API Gateway]
+    B --> C[Worker Pipeline]
+    C --> D[(Primary Database)]
+```
+
+## 3. Decisions & Trade-Offs
+
+> [!CHOICE] Key Architectural Decision
+> **Question**: Which approach should we take for X?
+> - (x) **Option A**: Approach 1 (Fast, reliable, standard) [Recommended]
+> - ( ) **Option B**: Approach 2 (Custom, flexible)
+
+> [!QUESTION] Requirement Clarification
+> **Question**: Are there any specific constraints on Y we should adhere to?
+
+## 4. Data Model & Schema Migrations
+```sql
+-- Migration details or code snippets
+create table example (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now()
+);
+```
+
+## 5. Step-by-Step Implementation Breakdown
 1. **Module A (`src/moduleA.js`)**: Add X handler with Y signature.
 2. **Module B (`src/moduleB.js`)**: Refactor Z logic.
 
-```javascript
-// Keep code snippets short and focused on critical interfaces
-function example() { ... }
-```
-</details>
+## 6. File Changes Breakdown
 
-<details>
-<summary>📁 File Changes Summary (X files)</summary>
+| File | Action | Description |
+|---|---|---|
+| `src/core.js` | `[MODIFY]` | Add helper method for event dispatch |
+| `src/new-service.js` | `[NEW]` | Implement worker service logic |
+| `tests/service.test.js` | `[NEW]` | Add unit and integration tests |
 
-- `src/core.js` `[MODIFY]`: Add helper method.
-- `src/new-feature.js` `[NEW]`: Module implementation.
-- `tests/feature.test.js` `[NEW]`: Unit tests.
-</details>
-
-<details>
-<summary>🧪 Verification & Testing Plan</summary>
-
+## 7. Verification & Automated Test Plan
 - Run automated test suite: `npm test`
 - Manual verification steps:
-  1. Step 1 ...
-  2. Step 2 ...
-</details>
+  1. Trigger test event via CLI.
+  2. Verify correct database record creation.
+<!-- /FULL -->
 ```
 
 ---
 
-## 2. Progressive Disclosure via Collapsible `<details>` Blocks
+## 2. Supported Section Delimiter Formats
 
-Never paste long code snippets, extensive file listings, or deep architectural deep-dives directly into the main plan body. Wrap them in `<details><summary>`:
+Plan Previewer recognizes several delimiter styles (HTML comments are recommended):
 
-- `<details><summary>🔍 Deep Dive: Architecture & Implementation Details</summary> ... </details>`
-- `<details><summary>📁 File Changes Breakdown (X files)</summary> ... </details>`
-- `<details><summary>🧪 Detailed Testing & Edge Cases</summary> ... </details>`
-- `<details><summary>⚙️ Command Sequences & Configuration</summary> ... </details>`
+- **HTML Comments (Recommended)**:
+  ```markdown
+  <!-- SUMMARY -->
+  ... summary content ...
+  <!-- /SUMMARY -->
 
-Plan Previewer renders these as sleek, interactive accordions that can be expanded with one click or collapsed globally in **Summary View**.
+  <!-- FULL -->
+  ... full specification content ...
+  <!-- /FULL -->
+  ```
+- **HTML Container Tags**:
+  ```markdown
+  <div data-view="summary">
+  ... summary content ...
+  </div>
+
+  <div data-view="full">
+  ... full specification content ...
+  </div>
+  ```
 
 ---
 
-## 3. Interactive Choice Cards & Open Questions
+## 3. Interactive Choice & Question Blocks
 
-For key trade-offs or design decisions, use interactive choice and question blocks. Plan Previewer renders them as clickable selection cards:
+For key trade-offs or design decisions, use interactive choice and question blocks. Plan Previewer groups them into a unified **Decisions Tray** (`D1`, `D2`, `Q1`) with a live resolution counter:
 
 ```markdown
 > [!CHOICE] Database Architecture Choice
@@ -103,9 +146,9 @@ For key trade-offs or design decisions, use interactive choice and question bloc
 
 ## 4. GitHub Alert Callouts
 
-Use callouts sparingly to draw focus to critical points:
+Use callouts to draw focus to critical points:
 - `> [!NOTE]` for executive summaries and context.
-- `> [!IMPORTANT]` for core requirements and critical invariants.
+- `> [!IMPORTANT]` for core invariants and non-negotiable requirements.
 - `> [!TIP]` for optimization opportunities or best practices.
 - `> [!WARNING]` for breaking changes, caveats, or potential regressions.
 - `> [!CAUTION]` for destructive actions or data loss risks.
@@ -118,18 +161,4 @@ Tag files and sections with high-contrast inline markers:
 - `[NEW]` for new files being created.
 - `[MODIFY]` for existing files being edited.
 - `[DELETE]` for files being removed.
-- `[HIGH RISK]` or `[LOW RISK]` for section risk indicators.
-
----
-
-## 6. Mermaid Visual Diagrams
-
-For complex flows, use simple Mermaid diagrams:
-
-```mermaid
-graph TD
-    A[User Request] --> B[High-Level Plan]
-    B --> C[Plan Previewer Interactive UI]
-    C --> D[User Approval / Feedback]
-    D --> E[Execution]
-```
+- `[HIGH RISK]` / `[LOW RISK]` for operational risk indicators.
