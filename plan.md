@@ -1,81 +1,95 @@
-# Plan Previewer Tool & UI Overhaul
+# Plan Previewer: Human-Readable Progressive Disclosure & Visual Polish
 
 > [!NOTE]
-> **Round 2 Updates Applied**: Addressed all 4 requested changes:
-> 1. **Text Selection Comment Modal**: Floating elevated popover card positioned directly next to selected text with clean borders, inline highlight marks, and instant cancellation/submission.
-> 2. **Distinct Activity Colors**: Choice selections (Violet `#8b5cf6`), Text notes/highlights (Amber `#f59e0b`), Open Question answers (Cyan `#0ea5e9`).
-> 3. **Wide vs Full Distinction**: Wide is a balanced ~1160px centered column; Full stretches 100% edge-to-edge across the screen.
-> 4. **Action Button States**: "Request changes" is unclickable and dimmed until you type a comment, make a choice, or leave a note.
+> **Executive Summary**: Upgraded Plan Previewer to prioritize human readability with a 30-second scanning experience by default. Deep technical details, long code snippets, and verification suites are organized into sleek, collapsible accordion cards with high-contrast executive summaries and choice blocks.
 
 ---
 
-## 1. Agent Response Notes on Change Requests
+## High-Level Architecture & Strategy
 
-When the user clicks **Request Changes** with feedback, the agent can supply a summary of what changed (via `--response="..."` CLI flag or `.plan-response.md` file).
+- **Progressive Disclosure**: High-level strategy and key decisions are immediately visible on canvas; low-level implementation details are tucked into styled `<details>` accordions.
+- **Dual View Modes**: Switch between **Summary Mode** (compact 30-second scan) and **Full Mode** (all details expanded) with one click in the top header.
+- **Ultra-Clean Theme Palette**: Ultra-clean GitHub/Vercel/Linear design palette for both Light and Dark modes with zero background visual noise and crisp text contrast.
 
 ```mermaid
 graph LR
-    A[User requests changes + comments] --> B[Agent revises plan.md]
-    B --> C[Agent re-runs with --response="..."]
-    C --> D[Server captures response]
-    D --> E[Web UI Activity Feed displays Authored Agent Bubble]
+    A[Agent Generates Plan] --> B[30-Sec Summary View]
+    B --> C{Review Decisions}
+    C -->|Need Deep Dive?| D[Expand Collapsible Accordions]
+    C -->|Approved?| E[Instant Execution]
 ```
 
-- [x] **[MODIFY] `src/server.js`**: Added `agentResponses` array to session state, accepting response string in `POST /api/notify` and exposing in `GET /api/plan`.
-- [x] **[MODIFY] `bin/plan-previewer.js`**: Added `--response="<summary>"` and `--response-file="<path>"` CLI flags with auto-pickup of `.plan-response.md`.
-- [x] **[MODIFY] `public/app.js`**: Display authored explanation in the agent response bubble in the activity feed, with diff statistics (+N / -M lines) as metadata.
+---
+
+## Key Decisions & Options
+
+> [!CHOICE] Default View Density Mode
+> **Question**: Which view mode should Plan Previewer open with by default for new plans?
+> - (x) **Option A**: Summary View (Collapses `<details>` deep-dives by default for 30-second quick scanning) [Recommended]
+> - ( ) **Option B**: Full View (Expands all accordions and code blocks on launch)
+
+> [!CHOICE] Theme & Color Scheme
+> **Question**: How does this ultra-clean modern palette (GitHub/Vercel crisp contrast) look and feel?
+> - (x) **Option A**: Great — clean, high-contrast, comfortable for long reading [Recommended]
+> - ( ) **Option B**: Needs Further Adjustment
+
+> [!QUESTION] Additional Customization Ideas
+> **Question**: Are there any additional layout or interaction features you would like added to the viewer?
 
 ---
 
-## 2. Interactive Choice Selection Redesign
+## Execution Milestones
 
-- [x] **[MODIFY] `public/styles.css`**: Full-width selectable card rows with custom circular radio indicators, hover lift, bold selected state with purple tint, and `[Recommended]` badge styling.
-- [x] **[MODIFY] `public/app.js`**: Interactive cards with status chips ("Not answered" / "Selected") and explicit **Clear** actions.
-
-> [!CHOICE] Choice Card Visual Style
-> **Question**: Which visual style do you prefer for interactive choice cards?
-> - (x) **Option A**: Modern Card Grid (Distinct cards with left accent indicators, check badges, and pill tags) [Recommended]
-> - ( ) **Option B**: Compact List (Slimmer rows with radio bullets and subtle highlight)
-> - ( ) **Option C**: High-Contrast Bordered (Bold solid borders with prominent badge indicators)
-
----
-
-## 3. Responsive Layout & Screen Width (Narrow / Wide / Full)
-
-- [x] **[MODIFY] `public/styles.css`**:
-  - **Narrow (Comfortable)**: 820px centered reading column.
-  - **Wide (75%)**: 1160px centered column.
-  - **Full Width**: 100% fluid edge-to-edge layout stretching the card across the full screen.
-- [x] **[MODIFY] `public/index.html` & `public/app.js`**: Header width switcher persisted to `localStorage`, plus collapsible Outline and Activity sidebar buttons.
-
-> [!CHOICE] Default Width Setting
-> **Question**: What should be the default width mode on initial launch?
-> - (x) **Option A**: Wide Mode (~1160px / 75% width - ideal for tables, code, and diagrams) [Recommended]
-> - ( ) **Option B**: Full Width (100% fluid - edge-to-edge space utilization)
-> - ( ) **Option C**: Comfortable Mode (~820px - optimized for narrow reading)
+- [x] 1. Implement progressive disclosure skill (`rich-plan-formatting`)
+- [x] 2. Add Summary vs Full view switcher in header with section folding
+- [x] 3. Style `<details>` and `<summary>` accordions with smooth rotating chevrons & badges
+- [x] 4. Fix choice card selection persistence bug on re-render / feedback submission
+- [x] 5. Fix agent waiting typing indicator to only dismiss when agent actually updates plan
+- [x] 6. Polish Light & Dark theme palettes for high readability
+- [x] 7. Add SVG favicon to browser tab
 
 ---
 
-## 4. Live Selection Tracking in Activity Feed & Distinct Colors
+<details>
+<summary>🔍 Deep Dive: Architecture & Implementation Details</summary>
 
-- [x] **[MODIFY] `public/app.js`**:
-  - Real-time reactivity: picking an option immediately adds a badge to Draft Choices in the Activity sidebar.
-  - Distinct colors: **Violet** for design choices, **Amber** for text selection notes, **Cyan** for open question answers.
-  - Click any activity item to smoothly scroll and highlight that section in the plan.
-  - "Request changes" button is disabled until some activity (choice selection, comment, question answer, or text note) is made.
+### Progressive Disclosure System
+1. **Zero-DOM Mutation Design**: Retains native DOM structure so text selection, question popovers, and interactive radio choices remain 100% reliable.
+2. **Choice Card State Persistence**: Restores selected radio buttons and draft question answers from session memory across re-renders and change requests.
+3. **Smart Polling & Typing Indicator**: Tracks actual file content diffs and agent response timestamps so the typing indicator stays active while the agent works and only marks requests as addressed when updates land.
 
----
+```javascript
+// Example: View mode toggle logic
+function applyCurrentViewMode() {
+  const container = document.getElementById('renderedOutput');
+  const isSummary = state.viewMode === 'summary';
+  container.querySelectorAll('details').forEach(d => {
+    if (isSummary) d.removeAttribute('open');
+    else d.setAttribute('open', '');
+  });
+}
+```
+</details>
 
-## 5. Visual Polish & Universal Agent Branding
+<details>
+<summary>📁 File Changes Summary (5 files)</summary>
 
-- [x] **[MODIFY] `public/app.js`**: Dynamic agent avatar rendering for Pi CLI (purple/cyan gradient, π icon), Claude, and Antigravity.
-- [x] **[MODIFY] `public/styles.css`**: Floating text selection popover modal, inline mark highlight badges, toast animations, and theme contrast.
+- `public/styles.css` `[MODIFY]`: Refined color variables for light and dark themes, styled `<details>` & code blocks.
+- `public/app.js` `[MODIFY]`: Added view switcher, details processing, choice selection restoration, and accurate polling.
+- `public/index.html` `[MODIFY]`: Added View Mode controls and SVG tab favicon link.
+- `public/favicon.svg` `[NEW]`: Custom vector favicon for browser tab.
+- `skills/rich-plan-formatting/SKILL.md` `[MODIFY]`: Standardized progressive disclosure guidelines.
+</details>
 
----
+<details>
+<summary>🧪 Verification & Automated Test Suite</summary>
 
-## 6. Verification & Test Suite
-
-- [x] **`tests/choices.test.js`**: Unit tests for choice option parsing and recommended badge detection.
-- [x] **`tests/server-response.test.js`**: Test `--response` payload handling and API endpoints.
-- [x] **`tests/plan-mode-utils.test.js`**: Unit tests for Pi CLI plan mode safety.
-- [x] All 32 unit tests passing.
+- Run full test suite: `npm test` (38 passing tests)
+- Verification checklist:
+  - Theme toggle (Light/Dark mode contrast)
+  - View mode toggle (Summary / Full)
+  - Choice selection persistence
+  - Agent response waiting indicator
+  - Copy button functionality on code blocks
+  - Browser tab SVG favicon rendering
+</details>

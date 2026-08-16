@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <defs>
+    <linearGradient id="planGrad" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38bdf8"/>
+      <stop offset="0.5" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="cardGrad" x1="6" y1="4" x2="26" y2="28" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f1f5f9"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="8" fill="url(#planGrad)"/>
+  <rect x="6" y="5" width="20" height="22" rx="4" fill="url(#cardGrad)" stroke="rgba(255,255,255,0.4)" stroke-width="1"/>
+  <!-- Lines representing formatted plan -->
+  <rect x="9" y="9" width="8" height="2.5" rx="1.25" fill="#2563eb"/>
+  <rect x="9" y="14" width="14" height="2" rx="1" fill="#64748b"/>
+  <rect x="9" y="18" width="11" height="2" rx="1" fill="#94a3b8"/>
+  <!-- Interactive checkbox indicator -->
+  <circle cx="10.5" cy="22.5" r="1.5" fill="#10b981"/>
+  <rect x="13.5" y="21.5" width="8.5" height="2" rx="1" fill="#64748b"/>
+</svg>

@@ -8,6 +8,7 @@ import { spawn } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
 import pc from 'picocolors';
 import { resolveWaitTimeoutSec } from '../src/wait-timeout.js';
+import { findSessionPort, probeServerForPlan } from '../src/session-port.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,7 +53,7 @@ function parseArgs() {
   const args = process.argv.slice(2);
   const options = {
     open: true,
-    port: 3456,
+    port: null,
     agent: null,
   };
 
@@ -66,9 +67,9 @@ function parseArgs() {
     } else if (arg === '--no-open') {
       options.open = false;
     } else if (arg.startsWith('--port=')) {
-      options.port = parseInt(arg.split('=')[1], 10) || 3456;
+      options.port = parseInt(arg.split('=')[1], 10);
     } else if (arg === '-p' || arg === '--port') {
-      options.port = parseInt(args[++i], 10) || 3456;
+      options.port = parseInt(args[++i], 10);
     } else if (arg.startsWith('--agent=')) {
       options.agent = arg.split('=')[1];
     } else if (arg.startsWith('--wait-timeout=')) {
@@ -149,35 +150,6 @@ ${pc.bold('Options:')}
 `);
 }
 
-function probeServerRunningNative(port) {
-  return new Promise((resolve) => {
-    const req = http.get(`http://localhost:${port}/api/status`, { agent: false, timeout: 800 }, (res) => {
-      let body = '';
-      res.on('data', (chunk) => { body += chunk; });
-      res.on('end', () => {
-        try {
-          const data = JSON.parse(body);
-          resolve(data && data.running === true);
-        } catch (e) {
-          resolve(false);
-        }
-      });
-    });
-    req.on('error', () => resolve(false));
-    req.on('timeout', () => { req.destroy(); resolve(false); });
-  });
-}
-
-// A single 800ms probe can false-negative under momentary system load (e.g. two
-// Node processes starting up close together), which used to cause a spurious
-// second server to be spawned. Retry a couple of times before giving up.
-async function isServerRunningNative(port, attempts = 3) {
-  for (let i = 0; i < attempts; i++) {
-    if (await probeServerRunningNative(port)) return true;
-    if (i < attempts - 1) await new Promise((r) => setTimeout(r, 150));
-  }
-  return false;
-}
 
 function waitForFeedbackNative(port, timeoutSec, planFile) {
   return new Promise((resolve) => {
@@ -238,14 +210,15 @@ async function main() {
   }
 
   const absolutePath = path.resolve(process.cwd(), filePath);
-  const port = options.port || 3456;
+  const sessionInfo = await findSessionPort(absolutePath, options.port);
+  const port = sessionInfo.port || 3456;
 
-  let running = await isServerRunningNative(port);
+  let running = sessionInfo.isRunning;
   const wasAlreadyRunning = running;
 
   if (!running) {
     const isSpawner = tryAcquireSpawnLock(port);
-    if (isSpawner) spawnDetachedServer(filePath, options);
+    if (isSpawner) spawnDetachedServer(filePath, { ...options, port });
     // A cold `npx` invocation can take well over 4s to resolve/install deps and
     // bind the port, especially on Windows. Give it a longer bounded window
     // (~12s) before giving up, so we don't falsely report a startup failure
@@ -253,8 +226,11 @@ async function main() {
     try {
       for (let i = 0; i < 60; i++) {
         await new Promise((r) => setTimeout(r, 200));
-        running = await probeServerRunningNative(port);
-        if (running) break;
+        const probe = await probeServerForPlan(port, absolutePath);
+        if (probe.running) {
+          running = true;
+          break;
+        }
       }
     } finally {
       if (isSpawner) releaseSpawnLock(port);
@@ -271,9 +247,9 @@ async function main() {
           context: options.context,
           agent: options.agent,
           response: options.response,
-          // If we just spawned this server ourselves, its own startup sequence
-          // already opens the browser tab - opening again here would duplicate it.
-          open: wasAlreadyRunning ? options.open : false,
+          // Only the initial spawner of a new server opens the browser tab.
+          // Reconnects / notify calls must never reopen browser tabs.
+          open: false,
         }),
       });
       console.log(pc.bold(pc.cyan(`\n🚀 Plan Previewer Connected (Server active on port ${port})`)));
@@ -287,6 +263,13 @@ async function main() {
       const fb = data.feedback;
       console.log(
         `\n[PLAN-REVIEW]: status=${fb.status.toUpperCase()} | comment="${fb.comment || 'None'}" | saved=.plan-feedback.json\n`
+      );
+    } else if (data && (data.closed || data.exit)) {
+      console.log(
+        pc.yellow(
+          `\n[PLAN-REVIEW]: Plan previewer was closed by the user without submitting changes.\n` +
+            `Review dismissed. To view the plan again, run: npx plan-previewer ${filePath}\n`
+        )
       );
     } else {
       console.log(

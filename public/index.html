@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Plan Previewer</title>
   
+  <!-- SVG Tab Favicon -->
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  
   <!-- IBM Plex Sans & IBM Plex Mono Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,7 +22,7 @@
   <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/diff@5/dist/diff.min.js"></script>
   
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body>
 
@@ -59,6 +62,18 @@
       </div>
 
       <div class="header-right">
+        <!-- View Mode Selector (Summary / Full) -->
+        <div class="view-mode-group" id="viewModeGroup" title="Switch between Compact Summary and Full Detailed view">
+          <button class="view-mode-btn" id="btnViewSummary" data-mode="summary" title="Compact Summary: hides deep details & code blocks for 30-sec scanning">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="15" y2="12"/><line x1="3" y1="18" x2="9" y2="18"/></svg>
+            <span>Summary</span>
+          </button>
+          <button class="view-mode-btn active" id="btnViewFull" data-mode="full" title="Full View: shows all expanded sections and technical details">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            <span>Full</span>
+          </button>
+        </div>
+
         <!-- Width Mode Selector -->
         <div class="width-toggle-group" id="widthToggleGroup" title="Change Document Layout Width">
           <button class="width-btn" data-width="comfortable" title="Comfortable reading width (~880px)">
@@ -106,6 +121,14 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
             <span>Outline</span>
           </span>
+          <div class="toc-actions">
+            <button class="toc-action-btn" id="btnCollapseAll" title="Collapse all sections">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 12 6 20 14"/></svg>
+            </button>
+            <button class="toc-action-btn" id="btnExpandAll" title="Expand all sections">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 6 12 14 20 6"/></svg>
+            </button>
+          </div>
         </div>
         <nav class="toc-list" id="tocList">
           <!-- Dynamic TOC items -->
@@ -122,6 +145,15 @@
               <span id="toastMessage">Plan updated live by agent</span>
             </div>
 
+            <!-- Summary Mode Banner -->
+            <div class="summary-mode-banner" id="summaryModeBanner">
+              <div class="summary-banner-left">
+                <span class="summary-banner-icon">✦</span>
+                <span><strong>Summary View:</strong> Showing high-level strategy, decisions & milestones</span>
+              </div>
+              <button type="button" class="btn-switch-to-full" id="btnSwitchToFull">Show Full Details →</button>
+            </div>
+
             <div class="md-body" id="renderedOutput">
               <!-- Rendered Markdown Plan -->
             </div>
@@ -133,15 +165,16 @@
       <aside class="questions-sidebar" id="questionsSidebar">
         <div class="sidebar-header">
           <span class="sidebar-title">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            <span>Activity & Feedback</span>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span>Activity</span>
           </span>
           <span class="sidebar-badge" id="sidebarBadge">0</span>
         </div>
         
         <div class="questions-list" id="questionsList">
           <div class="empty-sidebar" id="emptySidebar">
-            Select text in the plan to ask a question, or submit comments below.
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span>Pick an option, answer a question, or highlight text to start a reply.</span>
           </div>
         </div>
       </aside>
@@ -194,6 +227,6 @@
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>

@@ -18,6 +18,8 @@ let state = {
   status: 'in_review', // 'in_review', 'approved', 'changes_requested'
   serverAlive: true,
   widthMode: 'wide',
+  viewMode: 'full',
+  collapsedSections: new Set(),
   collapseLeft: false,
   collapseRight: false
 };
@@ -94,10 +96,144 @@ function initLayoutSettings() {
   const savedWidth = localStorage.getItem('plan-previewer-width-mode') || 'wide';
   setWidthMode(savedWidth);
 
+  const savedViewMode = localStorage.getItem('plan-previewer-view-mode') || 'summary';
+  setViewMode(savedViewMode);
+
   const savedCollapseLeft = localStorage.getItem('plan-previewer-collapse-left') === 'true';
   const savedCollapseRight = localStorage.getItem('plan-previewer-collapse-right') === 'true';
   setSidebarCollapsed('left', savedCollapseLeft);
   setSidebarCollapsed('right', savedCollapseRight);
+}
+
+function updateViewModeButtons(mode) {
+  document.querySelectorAll('.view-mode-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.mode === mode);
+  });
+}
+
+function setViewMode(mode) {
+  state.viewMode = mode;
+  localStorage.setItem('plan-previewer-view-mode', mode);
+
+  const layout = document.getElementById('appLayout');
+  if (layout) {
+    layout.setAttribute('data-view-mode', mode);
+  }
+
+  updateViewModeButtons(mode);
+  applyCurrentViewMode();
+}
+
+function applyCurrentViewMode() {
+  const layout = document.getElementById('appLayout');
+  if (layout) {
+    layout.setAttribute('data-view-mode', state.viewMode);
+  }
+
+  const container = document.getElementById('renderedOutput');
+  if (!container) return;
+
+  const isSummary = state.viewMode === 'summary';
+
+  // 1. Details accordions: close in summary, open in full
+  container.querySelectorAll('details').forEach((d) => {
+    if (isSummary) {
+      d.removeAttribute('open');
+    } else {
+      d.setAttribute('open', '');
+    }
+  });
+
+  // 2. Code blocks: collapse in summary, expand in full
+  container.querySelectorAll('.code-block-wrapper.is-long').forEach((wrapper) => {
+    const btn = wrapper.querySelector('.btn-expand-code span');
+    const svg = wrapper.querySelector('.btn-expand-code svg');
+    if (isSummary) {
+      wrapper.classList.add('code-collapsed');
+      if (btn) btn.textContent = 'Show more lines';
+      if (svg) svg.style.transform = 'rotate(0deg)';
+    } else {
+      wrapper.classList.remove('code-collapsed');
+      if (btn) btn.textContent = 'Show less';
+      if (svg) svg.style.transform = 'rotate(180deg)';
+    }
+  });
+
+  // 3. Sub-sections (H3): collapse in summary, expand in full
+  container.querySelectorAll('h3').forEach((h3) => {
+    h3.classList.toggle('section-collapsed', isSummary);
+    let curr = h3.nextElementSibling;
+    while (curr && !['H1', 'H2', 'H3'].includes(curr.tagName.toUpperCase())) {
+      curr.classList.toggle('section-node-hidden', isSummary);
+      curr = curr.nextElementSibling;
+    }
+  });
+}
+
+function collapseAllSections() {
+  const container = document.getElementById('renderedOutput');
+  if (!container) return;
+
+  // Close all details accordions
+  container.querySelectorAll('details').forEach((details) => {
+    details.removeAttribute('open');
+  });
+
+  // Collapse all long code blocks
+  container.querySelectorAll('.code-block-wrapper.is-long').forEach((wrapper) => {
+    wrapper.classList.add('code-collapsed');
+    const btn = wrapper.querySelector('.btn-expand-code span');
+    const svg = wrapper.querySelector('.btn-expand-code svg');
+    if (btn) btn.textContent = 'Show more lines';
+    if (svg) svg.style.transform = 'rotate(0deg)';
+  });
+
+  // Collapse all H2 and H3 sections
+  container.querySelectorAll('h2, h3').forEach((heading) => {
+    heading.classList.add('section-collapsed');
+    const isH2 = heading.tagName.toLowerCase() === 'h2';
+    const stopTags = isH2 ? ['H1', 'H2'] : ['H1', 'H2', 'H3'];
+    let curr = heading.nextElementSibling;
+    while (curr && !stopTags.includes(curr.tagName.toUpperCase())) {
+      curr.classList.add('section-node-hidden');
+      curr = curr.nextElementSibling;
+    }
+  });
+
+  showAgentUpdateToast('All sections & details collapsed');
+}
+
+function expandAllSections() {
+  const container = document.getElementById('renderedOutput');
+  if (!container) return;
+
+  // Open all details accordions
+  container.querySelectorAll('details').forEach((details) => {
+    details.setAttribute('open', '');
+  });
+
+  // Expand all long code blocks
+  container.querySelectorAll('.code-block-wrapper.is-long').forEach((wrapper) => {
+    wrapper.classList.remove('code-collapsed');
+    const btn = wrapper.querySelector('.btn-expand-code span');
+    const svg = wrapper.querySelector('.btn-expand-code svg');
+    if (btn) btn.textContent = 'Show less';
+    if (svg) svg.style.transform = 'rotate(180deg)';
+  });
+
+  // Expand all H2 and H3 sections
+  container.querySelectorAll('h2, h3').forEach((heading) => {
+    heading.classList.remove('section-collapsed');
+    const isH2 = heading.tagName.toLowerCase() === 'h2';
+    const stopTags = isH2 ? ['H1', 'H2'] : ['H1', 'H2', 'H3'];
+    let curr = heading.nextElementSibling;
+    while (curr && !stopTags.includes(curr.tagName.toUpperCase())) {
+      curr.classList.remove('section-node-hidden');
+      curr = curr.nextElementSibling;
+    }
+  });
+
+  showAgentUpdateToast('All sections & details expanded');
 }
 
 function setWidthMode(mode) {
@@ -170,54 +306,37 @@ function startFilePolling() {
       const res = await fetch('/api/version');
       const data = await res.json();
 
+      const mtimeChanged = Boolean(data.mtime && state.lastMtime && data.mtime !== state.lastMtime);
+      const versionChanged = Boolean(data.fileVersion && state.fileVersion && data.fileVersion > state.fileVersion);
+
       if (!state.serverAlive) {
         state.serverAlive = true;
-        state.fileVersion = data.fileVersion || 1;
         updateSubmitButtonsEnabled();
-
-        const planRes = await fetch('/api/plan');
-        const planData = await planRes.json();
-        if (planData.success) {
-          const contentChanged = planData.content !== state.content;
-          state.agentResponses = planData.agentResponses || state.agentResponses;
-          if (contentChanged) {
-            const diffSummary = summarizeDiff(state.content, planData.content);
-            const latestResponse = (state.agentResponses && state.agentResponses.length)
-              ? state.agentResponses[state.agentResponses.length - 1].text
-              : '';
-
-            state.feedbackHistory.forEach(item => {
-              if (item.status === 'pending') {
-                item.status = 'addressed';
-                item.addressedAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                item.diffSummary = diffSummary;
-                item.agentNote = latestResponse;
-              }
-            });
-            await fetchPlanData();
-            showAgentUpdateToast('Plan updated live by agent!');
-            renderQuestionsSidebar();
-          }
-        }
-        return;
       }
 
-      // Same server instance running: check if external edit changed plan content
-      if (data.fileVersion && data.fileVersion > state.fileVersion) {
-        state.fileVersion = data.fileVersion;
+      if (mtimeChanged || versionChanged || !state.lastMtime) {
+        state.fileVersion = data.fileVersion || state.fileVersion;
+        state.lastMtime = data.mtime || state.lastMtime;
 
-        const planRes = await fetch('/api/plan');
+        const planRes = await fetch('/api/plan?t=' + Date.now());
         const planData = await planRes.json();
 
         if (planData.success) {
+          const contentChanged = planData.content !== state.content;
+          const hasNewAgentResponse = Boolean(
+            planData.agentResponses &&
+            planData.agentResponses.length > (state.agentResponses ? state.agentResponses.length : 0)
+          );
           state.agentResponses = planData.agentResponses || state.agentResponses;
-          if (planData.content !== state.content) {
-            const diffSummary = summarizeDiff(state.content, planData.content);
+
+          // Only address pending requests when the agent actually updated content or sent a response
+          if (contentChanged || hasNewAgentResponse) {
+            const diffSummary = contentChanged ? summarizeDiff(state.content, planData.content) : null;
             const latestResponse = (state.agentResponses && state.agentResponses.length)
               ? state.agentResponses[state.agentResponses.length - 1].text
               : '';
 
-            state.feedbackHistory.forEach(item => {
+            state.feedbackHistory.forEach((item) => {
               if (item.status === 'pending') {
                 item.status = 'addressed';
                 item.addressedAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -226,9 +345,11 @@ function startFilePolling() {
               }
             });
 
-            await fetchPlanData();
-            showAgentUpdateToast('Plan updated live by agent!');
+            state.content = planData.content;
+            renderMarkdown();
             renderQuestionsSidebar();
+            updateSubmitButtonsEnabled();
+            showAgentUpdateToast('Plan updated live by agent!');
           }
         }
       }
@@ -241,15 +362,13 @@ function startFilePolling() {
   }, 1000);
 }
 
+function isWaitingForAgent() {
+  return state.feedbackHistory.some((item) => item.status === 'pending');
+}
+
 function updateActionButtonsState() {
   const requestBtn = document.getElementById('btnRequestChanges');
   if (!requestBtn) return;
-
-  const commentVal = document.getElementById('footerComment')?.value.trim() || '';
-  const hasSelections = Object.keys(state.selections).length > 0;
-  const hasAnswers = Object.keys(state.draftAnswers).length > 0;
-  const hasQuestions = state.questions.length > 0;
-  const hasPendingActivity = Boolean(commentVal || hasSelections || hasAnswers || hasQuestions);
 
   if (!state.serverAlive) {
     requestBtn.disabled = true;
@@ -257,6 +376,19 @@ function updateActionButtonsState() {
     requestBtn.title = 'Waiting for the agent to respond...';
     return;
   }
+
+  if (isWaitingForAgent()) {
+    requestBtn.disabled = true;
+    requestBtn.classList.add('btn-disabled');
+    requestBtn.title = 'Waiting for the agent to address your last request…';
+    return;
+  }
+
+  const commentVal = document.getElementById('footerComment')?.value.trim() || '';
+  const hasSelections = Object.keys(state.selections).length > 0;
+  const hasAnswers = Object.keys(state.draftAnswers).length > 0;
+  const hasQuestions = state.questions.length > 0;
+  const hasPendingActivity = Boolean(commentVal || hasSelections || hasAnswers || hasQuestions);
 
   requestBtn.disabled = !hasPendingActivity;
   requestBtn.classList.toggle('btn-disabled', !hasPendingActivity);
@@ -270,8 +402,21 @@ function updateSubmitButtonsEnabled() {
   const approveBtn = document.getElementById('btnApprovePlan');
   if (!requestBtn || !approveBtn) return;
 
-  approveBtn.disabled = !state.serverAlive;
-  approveBtn.title = state.serverAlive ? 'Approve plan and start execution' : 'Waiting for the agent to respond...';
+  const waiting = isWaitingForAgent();
+
+  if (!state.serverAlive) {
+    approveBtn.disabled = true;
+    approveBtn.classList.add('btn-disabled');
+    approveBtn.title = 'Waiting for the agent to respond...';
+  } else if (waiting) {
+    approveBtn.disabled = true;
+    approveBtn.classList.add('btn-disabled');
+    approveBtn.title = 'Waiting for the agent to address your last request…';
+  } else {
+    approveBtn.disabled = false;
+    approveBtn.classList.remove('btn-disabled');
+    approveBtn.title = 'Approve plan and start execution';
+  }
 
   updateActionButtonsState();
 }
@@ -290,7 +435,7 @@ function showAgentUpdateToast(msg) {
 
 async function fetchPlanData() {
   try {
-    const res = await fetch('/api/plan');
+    const res = await fetch('/api/plan?t=' + Date.now());
     const data = await res.json();
     if (data.success) {
       state.filename = data.filename || 'plan.md';
@@ -300,6 +445,14 @@ async function fetchPlanData() {
       state.callerAgent = data.callerAgent || state.callerAgent;
       state.sessionContext = data.sessionContext || extractPlanGoal(data.content);
       state.agentResponses = data.agentResponses || [];
+
+      // Mark previous pending feedback items as addressed
+      state.feedbackHistory.forEach((item) => {
+        if (item.status === 'pending') {
+          item.status = 'addressed';
+          item.addressedAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+      });
 
       // Save to localStorage as fallback so page is NEVER blank
       if (state.content) {
@@ -353,6 +506,7 @@ function updateHeader() {
   document.getElementById('agentName').textContent = agentName;
   document.getElementById('pathLine').textContent = `${state.filename} · ${state.filePath}`;
   document.getElementById('goalTitle').textContent = state.sessionContext;
+  document.title = state.sessionContext ? `${state.sessionContext} · Plan Previewer` : 'Plan Previewer';
 
   updateStatusPill(state.status);
 }
@@ -544,16 +698,11 @@ async function renderMarkdown() {
   // Render Mermaid diagrams
   try { await processMermaidDiagrams(output); } catch (e) { console.warn('Mermaid render error:', e); }
 
-  // Highlight code blocks
-  try {
-    if (typeof hljs !== 'undefined') {
-      output.querySelectorAll('pre code').forEach((block) => {
-        if (!block.classList.contains('language-mermaid')) {
-          hljs.highlightElement(block);
-        }
-      });
-    }
-  } catch (e) {}
+  // Process Details & Summary elements
+  try { processDetailsElements(output); } catch (e) { console.warn('Details processing error:', e); }
+
+  // Process and highlight code blocks
+  try { processCodeBlocks(output); } catch (e) { console.warn('Code blocks processing error:', e); }
 
   // Process file diff badges and risk tags
   try { processVisualBadges(output); } catch (e) {}
@@ -561,12 +710,195 @@ async function renderMarkdown() {
   // Process task checkboxes & update progress bar
   try { processCheckboxes(); } catch (e) {}
 
+  // Attach heading fold toggle listeners
+  try { attachHeadingFoldListeners(output); } catch (e) {}
+
   // Generate Table of Contents navigation sidebar
   try { generateTableOfContents(output); } catch (e) {}
+
+  // Apply current View Mode
+  try { applyCurrentViewMode(); } catch (e) {}
+
+  // Initialize scroll-spy active state
+  try { setTimeout(updateTocScrollSpy, 50); } catch (e) {}
+}
+
+function attachHeadingFoldListeners(container) {
+  container.querySelectorAll('h2, h3').forEach((heading) => {
+    if (heading.dataset.foldAttached === 'true') return;
+    heading.dataset.foldAttached = 'true';
+    heading.classList.add('foldable-heading');
+
+    if (!heading.querySelector('.heading-fold-icon')) {
+      const foldIcon = document.createElement('span');
+      foldIcon.className = 'heading-fold-icon';
+      foldIcon.title = 'Click to toggle section';
+      foldIcon.innerHTML = `
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      `;
+      heading.prepend(foldIcon);
+    }
+
+    heading.addEventListener('click', (e) => {
+      // If clicking an interactive child element (like a link), do not toggle
+      if (e.target.closest('a, input, button:not(.heading-fold-icon)')) return;
+      const isH2 = heading.tagName.toLowerCase() === 'h2';
+      const stopTags = isH2 ? ['H1', 'H2'] : ['H1', 'H2', 'H3'];
+      const isNowCollapsed = heading.classList.toggle('section-collapsed');
+
+      let curr = heading.nextElementSibling;
+      while (curr && !stopTags.includes(curr.tagName.toUpperCase())) {
+        curr.classList.toggle('section-node-hidden', isNowCollapsed);
+        curr = curr.nextElementSibling;
+      }
+    });
+  });
+}
+
+function processDetailsElements(container) {
+  container.querySelectorAll('details').forEach((details) => {
+    details.classList.add('styled-details');
+
+    let summary = details.querySelector('summary');
+    if (!summary) {
+      summary = document.createElement('summary');
+      summary.textContent = 'Technical Details';
+      details.prepend(summary);
+    }
+    summary.classList.add('styled-summary');
+
+    // Add custom styled chevron icon if not present
+    if (!summary.querySelector('.details-chevron')) {
+      const chevron = document.createElement('span');
+      chevron.className = 'details-chevron';
+      chevron.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="9 18 15 12 9 6"></polyline>
+        </svg>
+      `;
+      summary.prepend(chevron);
+    }
+
+    // Add badge indicator if it has code / files
+    if (!summary.querySelector('.details-badge')) {
+      const text = summary.textContent.toLowerCase();
+      let badgeText = '';
+      if (text.includes('deep dive') || text.includes('technical')) badgeText = 'Technical';
+      else if (text.includes('file')) badgeText = 'Files';
+      else if (text.includes('test') || text.includes('verif')) badgeText = 'Testing';
+      else if (details.querySelector('pre, code')) badgeText = 'Code';
+      else if (details.querySelector('ul, ol')) badgeText = 'Details';
+
+      if (badgeText) {
+        const badge = document.createElement('span');
+        badge.className = 'details-badge';
+        badge.textContent = badgeText;
+        summary.appendChild(badge);
+      }
+    }
+  });
+}
+
+function processCodeBlocks(container) {
+  container.querySelectorAll('pre').forEach((pre) => {
+    // If inside a mermaid diagram or already processed, skip
+    if (pre.closest('.mermaid') || pre.classList.contains('mermaid') || pre.dataset.codeProcessed === 'true') {
+      return;
+    }
+    pre.dataset.codeProcessed = 'true';
+
+    const code = pre.querySelector('code');
+    if (!code) return;
+
+    if (typeof hljs !== 'undefined' && !code.classList.contains('language-mermaid')) {
+      try { hljs.highlightElement(code); } catch (e) {}
+    }
+
+    const codeText = code.textContent.trim();
+    const lines = codeText.split('\n');
+    const lineCount = lines.length;
+
+    // Detect language class
+    let lang = 'CODE';
+    if (code && code.className) {
+      const langMatch = code.className.match(/language-([a-zA-Z0-9_\-]+)/);
+      if (langMatch && langMatch[1] && langMatch[1] !== 'undefined' && !langMatch[1].startsWith('hljs')) {
+        lang = langMatch[1].toUpperCase();
+      }
+    }
+
+    // Create wrapper
+    const wrapper = document.createElement('div');
+    wrapper.className = 'code-block-wrapper';
+    pre.parentNode.insertBefore(wrapper, pre);
+    wrapper.appendChild(pre);
+
+    // Create Header bar
+    const header = document.createElement('div');
+    header.className = 'code-block-header';
+    header.innerHTML = `
+      <div class="code-meta-left">
+        <span class="code-lang-tag">${escapeHtml(lang)}</span>
+        <span class="code-line-count">${lineCount} ${lineCount === 1 ? 'line' : 'lines'}</span>
+      </div>
+      <button class="code-btn-copy" type="button" title="Copy code to clipboard">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+        <span>Copy</span>
+      </button>
+    `;
+
+    const copyBtn = header.querySelector('.code-btn-copy');
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(codeText);
+        copyBtn.classList.add('copied');
+        copyBtn.querySelector('span').textContent = 'Copied!';
+        setTimeout(() => {
+          copyBtn.classList.remove('copied');
+          copyBtn.querySelector('span').textContent = 'Copy';
+        }, 2000);
+      } catch (err) {
+        console.warn('Copy failed:', err);
+      }
+    });
+
+    wrapper.prepend(header);
+
+    // If more than 14 lines, make it collapsible
+    if (lineCount > 14) {
+      wrapper.classList.add('is-long');
+
+      const overlay = document.createElement('div');
+      overlay.className = 'code-expand-overlay';
+      overlay.innerHTML = `
+        <button class="btn-expand-code" type="button">
+          <span>Show all ${lineCount} lines</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </button>
+      `;
+
+      const expandBtn = overlay.querySelector('.btn-expand-code');
+      expandBtn.addEventListener('click', () => {
+        const isCollapsed = wrapper.classList.contains('code-collapsed');
+        setCodeBlockCollapsed(wrapper, !isCollapsed, lineCount);
+      });
+
+      wrapper.appendChild(overlay);
+    }
+  });
 }
 
 function processGitHubAlerts(container) {
   let choiceGroupIdx = 0;
+  let choiceNumber = 0;
+  let questionNumber = 0;
 
   container.querySelectorAll('blockquote').forEach((bq) => {
     const text = bq.textContent.trim();
@@ -577,12 +909,12 @@ function processGitHubAlerts(container) {
       const titleText = alertMatch[2] ? alertMatch[2].trim() : alertType.toUpperCase();
 
       if (alertType === 'choice') {
-        renderInteractiveChoiceCard(bq, titleText, choiceGroupIdx++);
+        renderInteractiveChoiceCard(bq, titleText, choiceGroupIdx++, ++choiceNumber);
         return;
       }
 
       if (alertType === 'question') {
-        renderInteractiveQuestionCard(bq, titleText);
+        renderInteractiveQuestionCard(bq, titleText, ++questionNumber);
         return;
       }
 
@@ -636,51 +968,97 @@ function parseChoiceItemData(rawText) {
   return { title, description, isRecommended, isDefaultChecked, cleanText: clean };
 }
 
-function renderInteractiveChoiceCard(bq, title, groupIdx) {
-  const card = document.createElement('div');
-  card.className = 'interactive-choice-card';
-  card.id = `choice_card_${groupIdx}`;
-  card.dataset.choiceTitle = title;
+/* Decisions Tray: groups consecutive [!CHOICE]/[!QUESTION] blocks into one flat, organized container */
+function getOrCreateDecisionsTray(bq) {
+  const prev = bq.previousElementSibling;
+  if (prev && prev.classList && prev.classList.contains('decisions-tray')) {
+    return prev;
+  }
 
-  // Header with title, status chip, and clear button
+  const tray = document.createElement('div');
+  tray.className = 'decisions-tray';
+  tray.innerHTML = `
+    <div class="decisions-tray-header">
+      <div class="decisions-tray-title">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+        <span>Decisions</span>
+        <span class="decisions-tray-count">0 of 0 resolved</span>
+      </div>
+      <span class="decisions-tray-hint">Resolve before execution</span>
+    </div>
+    <div class="decisions-tray-body"></div>`;
+  bq.before(tray);
+  return tray;
+}
+
+function updateDecisionsTrayCount(tray) {
+  const rows = tray.querySelectorAll('.decision-row');
+  const answered = tray.querySelectorAll('.decision-row.row-answered').length;
+  const countEl = tray.querySelector('.decisions-tray-count');
+  if (countEl) countEl.textContent = `${answered} of ${rows.length} resolved`;
+}
+
+function truncateText(text, max) {
+  const clean = (text || '').trim();
+  return clean.length > max ? clean.slice(0, max).trim() + '\u2026' : clean;
+}
+
+function renderInteractiveChoiceCard(bq, title, groupIdx, decisionNumber) {
+  const tray = getOrCreateDecisionsTray(bq);
+  const rowsContainer = tray.querySelector('.decisions-tray-body');
+
+  const row = document.createElement('div');
+  row.className = 'decision-row row-collapsed';
+  row.id = `choice_card_${groupIdx}`;
+  row.dataset.choiceTitle = title;
+
   const header = document.createElement('div');
-  header.className = 'choice-card-header';
+  header.className = 'decision-row-header';
 
-  const titleGroup = document.createElement('div');
-  titleGroup.className = 'choice-card-title-group';
-  titleGroup.innerHTML = `
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
-    <span>DESIGN CHOICE: ${escapeHtml(title)}</span>`;
-  header.appendChild(titleGroup);
+  const badge = document.createElement('span');
+  badge.className = 'decision-badge decision-badge-choice';
+  badge.textContent = `D${decisionNumber}`;
+  header.appendChild(badge);
 
-  const actions = document.createElement('div');
-  actions.className = 'choice-card-actions';
+  const titleWrap = document.createElement('div');
+  titleWrap.className = 'decision-row-title';
+  const nameEl = document.createElement('div');
+  nameEl.className = 'decision-row-name';
+  nameEl.textContent = title;
+  const subEl = document.createElement('div');
+  subEl.className = 'decision-row-sub';
+  titleWrap.appendChild(nameEl);
+  titleWrap.appendChild(subEl);
+  header.appendChild(titleWrap);
 
   const statusBadge = document.createElement('span');
   statusBadge.className = 'card-status-badge unanswered';
   statusBadge.textContent = 'Not answered';
-  actions.appendChild(statusBadge);
+  header.appendChild(statusBadge);
 
-  const clearBtn = document.createElement('button');
-  clearBtn.className = 'btn-clear-choice';
-  clearBtn.textContent = 'Clear';
-  clearBtn.style.display = 'none';
-  actions.appendChild(clearBtn);
+  const chevron = document.createElement('span');
+  chevron.className = 'decision-row-chevron';
+  chevron.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>`;
+  header.appendChild(chevron);
 
-  header.appendChild(actions);
-  card.appendChild(header);
+  header.addEventListener('click', (e) => {
+    if (e.target.closest('.btn-clear-choice')) return;
+    row.classList.toggle('row-collapsed');
+  });
+  row.appendChild(header);
 
   const body = document.createElement('div');
-  body.className = 'choice-body';
+  body.className = 'decision-row-body';
 
   const items = bq.querySelectorAll('li');
   const paragraph = bq.querySelector('p');
+  const optionTitles = [];
 
   if (paragraph) {
     const qText = paragraph.innerHTML.replace(/\[!CHOICE\][^\n<]*/gi, '').trim();
     if (qText) {
       const qDiv = document.createElement('div');
-      qDiv.className = 'choice-question-text';
+      qDiv.className = 'decision-row-question';
       qDiv.innerHTML = qText;
       body.appendChild(qDiv);
     }
@@ -689,18 +1067,34 @@ function renderInteractiveChoiceCard(bq, title, groupIdx) {
   const optionsContainer = document.createElement('div');
   optionsContainer.className = 'choice-options-list';
 
+  const existingSelection = state.selections[title];
+  const hasExisting = Boolean(existingSelection && existingSelection.selectedText);
+
+  const clearBtn = document.createElement('button');
+  clearBtn.className = 'btn-clear-choice';
+  clearBtn.textContent = 'Clear';
+
+  function updateSubtitle() {
+    const sel = state.selections[title];
+    subEl.textContent = sel && sel.selectedText
+      ? truncateText(sel.selectedText, 70)
+      : optionTitles.join(' \u00b7 ');
+  }
+
   function updateCardState(selectedVal) {
     if (selectedVal) {
       statusBadge.className = 'card-status-badge answered';
       statusBadge.textContent = 'Selected';
-      clearBtn.style.display = 'inline-block';
-      state.selections[title] = { selectedText: selectedVal, cardId: card.id };
+      row.classList.add('row-answered');
+      state.selections[title] = { selectedText: selectedVal, cardId: row.id };
     } else {
       statusBadge.className = 'card-status-badge unanswered';
       statusBadge.textContent = 'Not answered';
-      clearBtn.style.display = 'none';
+      row.classList.remove('row-answered');
       delete state.selections[title];
     }
+    updateSubtitle();
+    updateDecisionsTrayCount(tray);
     updateActionButtonsState();
     renderQuestionsSidebar();
   }
@@ -715,16 +1109,26 @@ function renderInteractiveChoiceCard(bq, title, groupIdx) {
 
   items.forEach((li) => {
     const rawText = li.textContent.trim();
-    const { title: optTitle, description: optDesc, isRecommended, cleanText } = parseChoiceItemData(rawText);
+    const { title: optTitle, description: optDesc, isRecommended, isDefaultChecked, cleanText } = parseChoiceItemData(rawText);
+    optionTitles.push(optTitle);
+
+    const isSelected = (hasExisting && existingSelection.selectedText === cleanText) || (!hasExisting && isDefaultChecked);
 
     const optLabel = document.createElement('label');
     optLabel.className = 'choice-option-item';
+    if (isSelected) {
+      optLabel.classList.add('selected');
+      statusBadge.className = 'card-status-badge answered';
+      statusBadge.textContent = 'Selected';
+      row.classList.add('row-answered');
+      state.selections[title] = { selectedText: cleanText, cardId: row.id };
+    }
 
     const radio = document.createElement('input');
     radio.type = 'radio';
     radio.name = `choice_group_${groupIdx}`;
     radio.value = cleanText;
-    radio.checked = false;
+    radio.checked = isSelected;
     radio.style.position = 'absolute';
     radio.style.opacity = '0';
     radio.style.pointerEvents = 'none';
@@ -782,51 +1186,96 @@ function renderInteractiveChoiceCard(bq, title, groupIdx) {
   });
 
   body.appendChild(optionsContainer);
-  card.appendChild(body);
-  bq.replaceWith(card);
+
+  const clearRow = document.createElement('div');
+  clearRow.className = 'decision-row-clear';
+  clearRow.appendChild(clearBtn);
+  body.appendChild(clearRow);
+
+  updateSubtitle();
+
+  row.appendChild(body);
+  rowsContainer.appendChild(row);
+  updateDecisionsTrayCount(tray);
+  bq.remove();
 }
 
-function renderInteractiveQuestionCard(bq, title) {
-  const card = document.createElement('div');
-  card.className = 'interactive-question-card';
-  card.id = `question_card_${Math.random().toString(36).slice(2, 8)}`;
-  card.dataset.questionTitle = title;
+function renderInteractiveQuestionCard(bq, title, decisionNumber) {
+  const tray = getOrCreateDecisionsTray(bq);
+  const rowsContainer = tray.querySelector('.decisions-tray-body');
+
+  const row = document.createElement('div');
+  row.className = 'decision-row row-collapsed';
+  row.id = `question_card_${Math.random().toString(36).slice(2, 8)}`;
+  row.dataset.questionTitle = title;
 
   const header = document.createElement('div');
-  header.className = 'choice-card-header';
+  header.className = 'decision-row-header';
 
-  const titleGroup = document.createElement('div');
-  titleGroup.className = 'choice-card-title-group question-card-title-group';
-  titleGroup.innerHTML = `
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-    <span>OPEN QUESTION: ${escapeHtml(title)}</span>`;
-  header.appendChild(titleGroup);
+  const badge = document.createElement('span');
+  badge.className = 'decision-badge decision-badge-question';
+  badge.textContent = `Q${decisionNumber}`;
+  header.appendChild(badge);
+
+  const titleWrap = document.createElement('div');
+  titleWrap.className = 'decision-row-title';
+  const nameEl = document.createElement('div');
+  nameEl.className = 'decision-row-name';
+  nameEl.textContent = title;
+  const subEl = document.createElement('div');
+  subEl.className = 'decision-row-sub';
+  titleWrap.appendChild(nameEl);
+  titleWrap.appendChild(subEl);
+  header.appendChild(titleWrap);
 
   const statusBadge = document.createElement('span');
   statusBadge.className = 'card-status-badge unanswered';
   statusBadge.textContent = 'Unanswered';
   header.appendChild(statusBadge);
 
-  card.appendChild(header);
+  const chevron = document.createElement('span');
+  chevron.className = 'decision-row-chevron';
+  chevron.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>`;
+  header.appendChild(chevron);
+
+  header.addEventListener('click', () => {
+    row.classList.toggle('row-collapsed');
+  });
+  row.appendChild(header);
 
   const body = document.createElement('div');
-  body.className = 'question-card-body';
+  body.className = 'decision-row-body';
 
   const paragraph = bq.querySelector('p');
+  let questionText = '';
   if (paragraph) {
-    const qText = paragraph.innerHTML.replace(/\[!QUESTION\][^\n<]*/gi, '').trim();
-    if (qText) {
+    questionText = paragraph.innerHTML.replace(/\[!QUESTION\][^\n<]*/gi, '').trim();
+    if (questionText) {
       const qDiv = document.createElement('div');
-      qDiv.className = 'choice-question-text';
-      qDiv.innerHTML = qText;
+      qDiv.className = 'decision-row-question';
+      qDiv.innerHTML = questionText;
       body.appendChild(qDiv);
     }
   }
 
   const textarea = document.createElement('textarea');
   textarea.className = 'question-card-textarea';
-  textarea.placeholder = 'Type your answer or preference for the agent here…';
+  textarea.placeholder = 'Type your answer or preference for the agent here\u2026';
   textarea.rows = 2;
+
+  function updateSubtitle() {
+    const draft = state.draftAnswers[title];
+    subEl.textContent = draft && draft.answer
+      ? truncateText(draft.answer, 70)
+      : truncateText(paragraph ? paragraph.textContent.replace(/^\[!QUESTION\][^\n]*/i, '') : '', 70);
+  }
+
+  if (state.draftAnswers[title] && state.draftAnswers[title].answer) {
+    textarea.value = state.draftAnswers[title].answer;
+    statusBadge.className = 'card-status-badge answered';
+    statusBadge.textContent = 'Answered';
+    row.classList.add('row-answered');
+  }
 
   let debounceTimer = null;
   textarea.addEventListener('input', () => {
@@ -834,12 +1283,16 @@ function renderInteractiveQuestionCard(bq, title) {
     if (val) {
       statusBadge.className = 'card-status-badge answered';
       statusBadge.textContent = 'Answered';
-      state.draftAnswers[title] = { answer: val, cardId: card.id };
+      row.classList.add('row-answered');
+      state.draftAnswers[title] = { answer: val, cardId: row.id };
     } else {
       statusBadge.className = 'card-status-badge unanswered';
       statusBadge.textContent = 'Unanswered';
+      row.classList.remove('row-answered');
       delete state.draftAnswers[title];
     }
+    updateSubtitle();
+    updateDecisionsTrayCount(tray);
     updateActionButtonsState();
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
@@ -848,8 +1301,12 @@ function renderInteractiveQuestionCard(bq, title) {
   });
 
   body.appendChild(textarea);
-  card.appendChild(body);
-  bq.replaceWith(card);
+  updateSubtitle();
+
+  row.appendChild(body);
+  rowsContainer.appendChild(row);
+  updateDecisionsTrayCount(tray);
+  bq.remove();
 }
 
 async function processMermaidDiagrams(container) {
@@ -921,10 +1378,29 @@ function generateTableOfContents(container) {
 
     const item = document.createElement('div');
     item.className = `toc-item toc-${heading.tagName.toLowerCase()}`;
+    item.dataset.tocTarget = id;
     item.textContent = heading.textContent.replace(/^(#+\s*|\[!(NOTE|TIP|WARNING|CHOICE|QUESTION)\])/, '').trim();
 
     item.addEventListener('click', () => {
-      heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // If inside a details accordion, auto-open it
+      const parentDetails = heading.closest('details');
+      if (parentDetails) {
+        parentDetails.setAttribute('open', '');
+      }
+
+      // If heading was collapsed, expand it
+      if (heading.classList.contains('section-collapsed')) {
+        heading.classList.remove('section-collapsed');
+        const isH2 = heading.tagName.toLowerCase() === 'h2';
+        const stopTags = isH2 ? ['H1', 'H2'] : ['H1', 'H2', 'H3'];
+        let curr = heading.nextElementSibling;
+        while (curr && !stopTags.includes(curr.tagName.toUpperCase())) {
+          curr.classList.remove('section-node-hidden');
+          curr = curr.nextElementSibling;
+        }
+      }
+
+      scrollAndHighlight(id);
     });
 
     tocList.appendChild(item);
@@ -942,9 +1418,33 @@ function scrollAndHighlight(elementId) {
   setTimeout(() => el.classList.remove('highlight-flash'), 1500);
 }
 
+function updateTocScrollSpy() {
+  const scrollArea = document.getElementById('docScrollArea');
+  const tocList = document.getElementById('tocList');
+  if (!scrollArea || !tocList) return;
+
+  const headings = document.querySelectorAll('#renderedOutput h1[id], #renderedOutput h2[id], #renderedOutput h3[id]');
+  if (!headings.length) return;
+
+  const refTop = scrollArea.getBoundingClientRect().top + 120;
+  let activeId = headings[0].id;
+  headings.forEach((h) => {
+    if (h.getBoundingClientRect().top <= refTop) activeId = h.id;
+  });
+
+  tocList.querySelectorAll('.toc-item').forEach((item) => {
+    item.classList.toggle('toc-active', item.dataset.tocTarget === activeId);
+  });
+}
+
 function setupEventListeners() {
   const scrollArea = document.getElementById('docScrollArea');
   const popover = document.getElementById('selectionPopover');
+
+  // Scroll-spy: highlight the active section in the Outline sidebar while scrolling
+  scrollArea.addEventListener('scroll', () => {
+    window.requestAnimationFrame(updateTocScrollSpy);
+  }, { passive: true });
 
   // Text selection listener for question popover
   scrollArea.addEventListener('mouseup', () => {
@@ -986,6 +1486,33 @@ function setupEventListeners() {
   });
 
   document.getElementById('btnPopoverAsk').addEventListener('click', submitQuestionFromPopover);
+
+  // View Mode switcher (Summary / Full)
+  const btnViewSummary = document.getElementById('btnViewSummary');
+  if (btnViewSummary) {
+    btnViewSummary.addEventListener('click', () => setViewMode('summary'));
+  }
+
+  const btnViewFull = document.getElementById('btnViewFull');
+  if (btnViewFull) {
+    btnViewFull.addEventListener('click', () => setViewMode('full'));
+  }
+
+  const btnSwitchToFull = document.getElementById('btnSwitchToFull');
+  if (btnSwitchToFull) {
+    btnSwitchToFull.addEventListener('click', () => setViewMode('full'));
+  }
+
+  // TOC sidebar Collapse/Expand all buttons
+  const btnCollapseAll = document.getElementById('btnCollapseAll');
+  if (btnCollapseAll) {
+    btnCollapseAll.addEventListener('click', collapseAllSections);
+  }
+
+  const btnExpandAll = document.getElementById('btnExpandAll');
+  if (btnExpandAll) {
+    btnExpandAll.addEventListener('click', expandAllSections);
+  }
 
   // Width mode switcher
   document.querySelectorAll('.width-btn').forEach((btn) => {
@@ -1036,6 +1563,17 @@ function setupEventListeners() {
   document.getElementById('btnApprovePlan').addEventListener('click', () => {
     if (!state.serverAlive) return;
     submitFeedback('approved');
+  });
+
+  // Notify server when tab is closed or navigated away
+  window.addEventListener('pagehide', () => {
+    try {
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon('/api/shutdown', JSON.stringify({ reason: 'tab_closed' }));
+      } else {
+        fetch('/api/shutdown', { method: 'POST', keepalive: true }).catch(() => {});
+      }
+    } catch (e) {}
   });
 }
 
@@ -1116,8 +1654,8 @@ function renderQuestionsSidebar() {
 
   const selectionKeys = Object.keys(state.selections);
   const draftAnswerKeys = Object.keys(state.draftAnswers);
-  const totalDraftCount = selectionKeys.length + draftAnswerKeys.length;
-  const totalHistoryCount = state.questions.length + state.feedbackHistory.length;
+  const totalDraftCount = selectionKeys.length + draftAnswerKeys.length + state.questions.length;
+  const totalHistoryCount = state.feedbackHistory.length;
   const totalItems = totalDraftCount + totalHistoryCount;
 
   badge.textContent = totalItems;
@@ -1125,21 +1663,20 @@ function renderQuestionsSidebar() {
   if (totalItems === 0) {
     list.innerHTML = `
       <div class="empty-sidebar">
-        <div class="empty-icon">💬</div>
-        <div class="empty-title">Activity Feed Empty</div>
-        <div class="empty-sub">Make design choices in the plan, select text to ask questions, or write overall comments below.</div>
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span>Pick an option, answer a question, or highlight text to start a reply.</span>
       </div>`;
     return;
   }
 
   let html = '';
 
-  // 1. Render Draft Selections & Answers Panel (if any active)
+  // 1. Render "Pending this turn" panel (draft choices, answers & text notes)
   if (totalDraftCount > 0) {
     html += `
       <div class="draft-selections-box">
         <div class="draft-selections-header">
-          <span>Draft Choices (${totalDraftCount})</span>
+          <span>Pending this turn</span>
         </div>
         <div class="draft-items-list">`;
 
@@ -1147,23 +1684,37 @@ function renderQuestionsSidebar() {
       const item = state.selections[title];
       html += `
         <div class="draft-selection-pill pill-choice" onclick="scrollAndHighlight('${item.cardId}')" title="Design Choice: Click to scroll to this card">
-          <div>
-            <span class="pill-title">Choice:</span>
-            <span>${escapeHtml(item.selectedText)}</span>
-          </div>
-          <svg class="pill-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="pill-dot"></span>
+          <span class="pill-content">
+            <span class="pill-title">${escapeHtml(title.toUpperCase())}</span>
+            <span class="pill-body">${escapeHtml(item.selectedText)}</span>
+          </span>
         </div>`;
     });
 
     draftAnswerKeys.forEach((title) => {
       const item = state.draftAnswers[title];
       html += `
-        <div class="draft-selection-pill pill-question" onclick="scrollAndHighlight('${item.cardId}')" title="Question Answer: Click to scroll to this card">
-          <div>
-            <span class="pill-title">Answer:</span>
-            <span>"${escapeHtml(item.answer)}"</span>
-          </div>
-          <svg class="pill-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+        <div class="draft-selection-pill pill-choice" onclick="scrollAndHighlight('${item.cardId}')" title="Question Answer: Click to scroll to this card">
+          <span class="pill-dot"></span>
+          <span class="pill-content">
+            <span class="pill-title">${escapeHtml(title.toUpperCase())} · ANSWER</span>
+            <span class="pill-body">${escapeHtml(item.answer)}</span>
+          </span>
+        </div>`;
+    });
+
+    state.questions.forEach((q) => {
+      html += `
+        <div class="draft-selection-pill pill-note" onclick="scrollToNote(${q.id})" title="Note on selection: Click to scroll to this card">
+          <span class="pill-dot"></span>
+          <span class="pill-content">
+            <span class="pill-title">NOTE ON SELECTION</span>
+            <span class="pill-body">${escapeHtml(q.text)}</span>
+          </span>
+          <button class="btn-delete-chat-item" onclick="event.stopPropagation(); deleteQuestion(${q.id})" title="Delete note">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
         </div>`;
     });
 
@@ -1204,51 +1755,48 @@ function renderQuestionsSidebar() {
             </div>
             <div class="typing-indicator">
               <span class="typing-label">${escapeHtml(agentName)} is updating the plan</span>
+              <span class="typing-dots"><span></span><span></span><span></span></span>
             </div>
           </div>`;
       } else {
         const responseTime = item.addressedAt || item.timestamp;
         const diff = item.diffSummary;
         const note = item.agentNote;
+        const detailsId = `diff_details_${item.id}`;
+        const hasDetails = Boolean(diff);
+        const summaryLine = note
+          ? null
+          : `Plan was updated live by <strong>${escapeHtml(agentName)}</strong>.`;
 
         html += `
           <div class="chat-bubble bubble-agent bubble-response">
             <div class="bubble-header">
               <div class="agent-avatar-sm" style="${agentStyle}">${agentSymbol}</div>
               <span class="bubble-sender">${escapeHtml(agentName)}</span>
+              <span class="bubble-tag bubble-tag-done">Updated</span>
               <span class="bubble-time">${responseTime}</span>
             </div>
             <div class="bubble-response-content">
               ${note ? `<div class="agent-authored-note">${escapeHtml(note)}</div>` : ''}
+              ${summaryLine ? `<div class="diff-metadata-row">${summaryLine}</div>` : ''}
               ${
-                diff
-                  ? `<div class="diff-metadata-row">
-                      <span>Plan modified:</span>
-                      <span class="diff-added">+${diff.added}</span> / <span class="diff-removed">-${diff.removed}</span> lines
-                      ${diff.headings.length ? `(sections: ${diff.headings.map(h => escapeHtml(h)).join(', ')})` : ''}
+                hasDetails
+                  ? `<button type="button" class="btn-toggle-details" onclick="toggleDiffDetails('${detailsId}', this)">
+                      <span>Show what changed</span>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="diff-details-panel" id="${detailsId}" style="display:none;">
+                      <div class="diff-metadata-row">
+                        <span>Plan modified:</span>
+                        <span class="diff-added">+${diff.added}</span> / <span class="diff-removed">-${diff.removed}</span> lines
+                      </div>
+                      ${diff.headings.length ? `<div class="diff-headings-row">Sections touched: ${diff.headings.map(h => `<span class="diff-heading-chip">${escapeHtml(h)}</span>`).join('')}</div>` : ''}
                     </div>`
-                  : `<div class="diff-metadata-row">Plan was updated live by <strong>${escapeHtml(agentName)}</strong>.</div>`
+                  : ''
               }
             </div>
           </div>`;
       }
-    });
-
-    // Section questions (highlighted text notes)
-    state.questions.forEach((q) => {
-      html += `
-        <div class="chat-bubble bubble-user bubble-question pill-note">
-          <div class="bubble-header">
-            <div class="user-avatar-sm" style="background: #f59e0b; color: #000;">Note</div>
-            <span class="bubble-sender" style="color: #d97706;">Text Note</span>
-            <span class="bubble-tag" style="background: rgba(245, 158, 11, 0.15); color: #d97706;">Snippet</span>
-            <button class="btn-delete-chat-item" onclick="deleteQuestion(${q.id})" title="Delete note">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
-          </div>
-          <div class="chat-quote">"${escapeHtml(q.quote)}"</div>
-          <div class="bubble-body-text">${escapeHtml(q.text)}</div>
-        </div>`;
     });
 
     html += '</div>';
@@ -1256,6 +1804,18 @@ function renderQuestionsSidebar() {
 
   list.innerHTML = html;
 }
+
+function scrollToNote(id) {
+  const root = document.getElementById('renderedOutput');
+  const mark = root && root.querySelector(`.commark[data-comment-id="${id}"]`);
+  if (!mark) return;
+  mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  mark.classList.remove('highlight-flash');
+  void mark.offsetWidth;
+  mark.classList.add('highlight-flash');
+  setTimeout(() => mark.classList.remove('highlight-flash'), 1500);
+}
+window.scrollToNote = scrollToNote;
 
 window.deleteQuestion = function(id) {
   state.questions = state.questions.filter((q) => q.id !== id);
@@ -1275,6 +1835,18 @@ window.deleteQuestion = function(id) {
 };
 
 window.scrollAndHighlight = scrollAndHighlight;
+
+window.toggleDiffDetails = function(detailsId, btnEl) {
+  const panel = document.getElementById(detailsId);
+  if (!panel) return;
+  const isHidden = panel.style.display === 'none' || !panel.style.display;
+  panel.style.display = isHidden ? 'block' : 'none';
+  if (btnEl) {
+    btnEl.classList.toggle('expanded', isHidden);
+    const label = btnEl.querySelector('span');
+    if (label) label.textContent = isHidden ? 'Hide what changed' : 'Show what changed';
+  }
+};
 
 function collectChoicesAndAnswers() {
   const choices = [];
@@ -1323,6 +1895,7 @@ async function submitFeedback(status) {
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
       state.feedbackHistory.push(historyItem);
+      updateSubmitButtonsEnabled();
     }
 
     if (commentInput) {
@@ -1376,6 +1949,7 @@ async function submitFeedback(status) {
     updateSubmitButtonsEnabled();
     showAgentUpdateToast("Couldn't reach the agent - it may still be working. Try again in a moment.");
   }
+  updateSubmitButtonsEnabled();
 }
 
 async function goBackAndClose() {

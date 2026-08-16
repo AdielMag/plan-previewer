@@ -16,17 +16,22 @@ export const LEGACY_RULE_HEADING = '# Plan Previewer Required Execution';
 export const MANDATORY_RULE_BLOCK = `
 # Plan Previewer Required Execution
 
-Whenever you write, update, or propose an execution plan or plan markdown file (such as \`./plan.md\`, \`PLAN.md\`, or temporary plan files), you MUST follow this protocol:
+Plan Previewer has two distinct triggers - know which one applies before you launch it:
 
-0. Apply the \`rich-plan-formatting\` skill to the plan content first - structure it with choice/question blocks, alert callouts, and status badges before launching the previewer.
+- **Phase A - Before execution (mandatory).** Any time you are authoring or revising an execution plan or plan markdown file (such as \`./plan.md\`, \`PLAN.md\`, or temporary plan files) for approval - including the very first draft and every \`changes_requested\`/\`questions_asked\` revision round - you MUST run the protocol below before proceeding.
+- **Phase B - After approval (execution phase).** Once \`status\` is \`'approved'\` and you have started executing, do NOT re-launch Plan Previewer just because the plan file changed again (e.g. checking off \`- [x]\` tasks, appending progress notes, logging status). Only launch it again if you have a deliberate, standalone reason to show the user something or ask them a question mid-execution (a blocking decision, a checkpoint, a final summary). When that happens, treat it as a fresh Phase A round and run the exact same protocol - do not substitute a plain chat message instead.
+
+## Protocol (both phases)
+
+0. Apply the \`rich-plan-formatting\` skill to the plan content first - keep it concise and human-readable first with progressive disclosure (collapsible deep-dives for low-level details), choice/question blocks, alert callouts, and status badges before launching the previewer.
 1. Run \`npx plan-previewer <path-to-plan> --context="<task summary>"\` in terminal as a plain command.
    - On **Claude Code** and **Pi CLI**: the command blocks in the foreground until feedback is submitted - simply let it run to completion.
    - On **Antigravity AGY**: If \`run_command\` sends the command to a background task, simply stop calling tools to end your turn. The installed \`Stop\` hook intercepts the execution loop's termination and automatically resumes the session with the result the instant feedback is submitted - no extra tool call is needed.
 2. **CRITICAL: STOP AND WAIT FOR IT TO EXIT.** Do NOT execute plan steps, edit files, or make further tool calls until the command finishes. It exits either when the user submits feedback in the web UI, or after a bounded wait with no decision yet (4 minutes under Pi CLI; elsewhere when the harness's own command timeout fires) - that second case is normal, not an error. Re-run the same command and keep waiting.
 3. Read \`.plan-feedback.json\` (or \`.plan-feedback.md\`), written next to the plan file, to inspect the user's comments, questions, and approval status.
 4. If the file doesn't exist yet, or its \`status\` is the same one you already handled in a previous round: the user hasn't responded yet - just re-run the exact same command again and keep waiting, as many times as it takes.
-5. If \`status\` is \`'approved'\`, immediately proceed with plan execution. If \`status\` is \`'changes_requested'\` or \`'questions_asked'\` and you haven't already addressed it, update the plan, then re-run the exact same command (same plan file, default port) and wait again - the already-open browser tab reconnects and shows the update automatically.
-6. On Claude Code, this is enforced by a \`PreToolUse\` hook on \`ExitPlanMode\` (\`~/.claude/hooks/require-plan-previewer.mjs\`). Exiting plan mode is blocked unless step 3's feedback file is fresh and \`"approved"\`. Do not attempt to bypass it; fix the underlying gap instead.
+5. If \`status\` is \`'approved'\`, immediately proceed with plan execution (Phase B) and stop re-launching Plan Previewer for routine plan-file edits from here on. If \`status\` is \`'changes_requested'\` or \`'questions_asked'\` and you haven't already addressed it, update the plan, then re-run the exact same command (same plan file, default port) and wait again - the already-open browser tab reconnects and shows the update automatically.
+6. On Claude Code, this is enforced by a \`PreToolUse\` hook on \`ExitPlanMode\` (\`~/.claude/hooks/require-plan-previewer.mjs\`). Exiting plan mode is blocked unless step 3's feedback file is fresh and \`"approved"\`. This hook only guards Phase A (leaving plan mode); it does not require re-running Plan Previewer during Phase B. Do not attempt to bypass it; fix the underlying gap instead.
 `;
 
 /**

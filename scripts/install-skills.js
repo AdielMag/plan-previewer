@@ -56,14 +56,19 @@ function generateSkillContent(agentId) {
   const agentFlag = agentId && agentId !== 'auto' ? ` --agent=${agentId}` : '';
   return `---
 name: plan-previewer
-description: MANDATORY. Execute whenever creating or updating plan markdown files to open browser viewer for user feedback.
+description: MANDATORY before executing a plan (authoring/approval + revision rounds) and any time you deliberately want to check in with the user mid-execution. NOT for routine plan-file edits (e.g. checklist ticking) after approval.
 ---
 
 # Plan Previewer Protocol
 
-Whenever writing or updating a markdown plan file (e.g. \`plan.md\`, \`PLAN.md\`), you MUST follow this protocol:
+Plan Previewer has two distinct triggers - know which one applies before you launch it:
 
-0. **Apply the \`rich-plan-formatting\` skill to the plan content first.** Before launching the previewer, structure the plan with its choice/question blocks, alert callouts, and status badges - Plan Previewer renders these specially, and a plain, unformatted plan defeats the point of reviewing it in this viewer.
+- **Phase A - Before execution (mandatory).** Any time you are authoring or revising a markdown plan file (e.g. \`plan.md\`, \`PLAN.md\`) for approval - including the first draft and every \`changes_requested\`/\`questions_asked\` revision round - you MUST follow the protocol below before proceeding.
+- **Phase B - After approval (execution phase).** Once \`status\` is \`"approved"\` and you've started executing, do NOT re-launch Plan Previewer just because the plan file changed again (checking off \`- [x]\` tasks, appending progress notes, etc). Only launch it again if you have a deliberate, standalone reason to show the user something or ask them a question mid-execution (a blocking decision, a checkpoint, a final summary). When that happens, run the exact same protocol again - don't fall back to a plain chat message instead.
+
+## Protocol (both phases)
+
+0. **Apply the \`rich-plan-formatting\` skill to the plan content first.** Before launching the previewer, structure the plan to be concise and human-readable first (with progressive disclosure via collapsible \`<details>\` blocks for low-level details, choice/question blocks, alert callouts, and status badges) - Plan Previewer renders these specially, and a bloated, unformatted plan defeats the point of reviewing it in this viewer.
 
 1. **Launch Previewer as a plain, blocking foreground command:**
    \`\`\`bash
@@ -80,10 +85,10 @@ Whenever writing or updating a markdown plan file (e.g. \`plan.md\`, \`PLAN.md\`
 3. **Inspect Feedback & Act**
    - Once the command exits, check \`.plan-feedback.json\` (or \`.plan-feedback.md\`) next to the plan file.
    - If it doesn't exist yet, or its \`status\` is the same one you already handled in a previous round (nothing new since your last check): the user simply hasn't responded yet. **Just re-run the exact same command again** and keep waiting — repeat as many times as it takes.
-   - If \`status\` is \`"approved"\`, DO NOT wait for another user prompt—immediately begin executing the plan steps.
+   - If \`status\` is \`"approved"\`, DO NOT wait for another user prompt—immediately begin executing the plan steps (Phase B), and stop re-launching Plan Previewer for routine plan-file edits from here on.
    - If \`status\` is \`"changes_requested"\` or \`"questions_asked"\` **and you haven't already addressed it**, address user comments/questions, update the plan file, then re-run the exact same command (same plan file, default port). The already-open browser tab detects the server coming back and shows your update in place automatically.
 
-4. **This is enforced, not optional, on Claude Code.** A \`PreToolUse\` hook on \`ExitPlanMode\`, installed alongside this skill, blocks exiting plan mode unless a fresh, \`"approved"\` \`.plan-feedback.json\` exists next to the plan file. Do not reason your way past steps 1-3.
+4. **This is enforced, not optional, on Claude Code.** A \`PreToolUse\` hook on \`ExitPlanMode\`, installed alongside this skill, blocks exiting plan mode unless a fresh, \`"approved"\` \`.plan-feedback.json\` exists next to the plan file. This hook only guards Phase A; it does not require re-running Plan Previewer for every Phase B plan-file edit. Do not reason your way past steps 1-3 during Phase A.
 `;
 }
 

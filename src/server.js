@@ -5,31 +5,10 @@ import { fileURLToPath } from 'url';
 import pc from 'picocolors';
 import openBrowser from 'open';
 import { detectCallerAgent } from './detector.js';
+import { writeSessionMarker, clearSessionMarker } from './session-port.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-const SESSION_MARKER_FILE = path.join(process.cwd(), '.plan-previewer-session.json');
-
-function writeActiveSessionMarker(planFilePath, port) {
-  try {
-    const data = {
-      pid: process.pid,
-      port,
-      planFile: planFilePath,
-      startTime: new Date().toISOString(),
-    };
-    fs.writeFileSync(SESSION_MARKER_FILE, JSON.stringify(data, null, 2), 'utf8');
-  } catch (err) {}
-}
-
-function clearActiveSessionMarker() {
-  try {
-    if (fs.existsSync(SESSION_MARKER_FILE)) {
-      fs.unlinkSync(SESSION_MARKER_FILE);
-    }
-  } catch (err) {}
-}
 
 /**
  * Starts the Plan Previewer HTTP Server and opens browser.
@@ -94,7 +73,13 @@ export async function startPlanPreviewer(filePath, options = {}) {
   app.use(express.json({ limit: '10mb' }));
 
   const publicDir = path.join(__dirname, '..', 'public');
-  app.use(express.static(publicDir));
+  app.use(express.static(publicDir, {
+    setHeaders: (res) => {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+  }));
 
   let lastHeartbeat = Date.now();
   let clientConnected = false;
@@ -102,7 +87,7 @@ export async function startPlanPreviewer(filePath, options = {}) {
   let pendingShutdownTimer = null;
   let idleInterval = null;
 
-  function exitOnce(reason) {
+  function exitOnce(reason, feedbackPayload = null) {
     if (exited) return;
     exited = true;
     if (pendingShutdownTimer) clearTimeout(pendingShutdownTimer);
@@ -111,13 +96,19 @@ export async function startPlanPreviewer(filePath, options = {}) {
       try { activeWatcher.close(); } catch (e) {}
       activeWatcher = null;
     }
-    clearActiveSessionMarker();
+    clearSessionMarker(currentPlanPath);
 
     const waiters = [...pendingFeedbackWaiters];
     pendingFeedbackWaiters = [];
     waiters.forEach((waiter) => {
       clearTimeout(waiter.timer);
-      try { waiter.res.json({ success: true, timeout: true, exit: true }); } catch (e) {}
+      try {
+        if (feedbackPayload) {
+          waiter.res.json({ success: true, timeout: false, ...feedbackPayload });
+        } else {
+          waiter.res.json({ success: true, timeout: true, exit: true });
+        }
+      } catch (e) {}
     });
 
     if (reason && !options.silent) console.log(reason);
@@ -140,11 +131,11 @@ export async function startPlanPreviewer(filePath, options = {}) {
     }
   }
 
-  function scheduleShutdown(reason, delayMs = 1500) {
+  function scheduleShutdown(reason, delayMs = 2500, feedbackPayload = null) {
     if (exited) return;
     if (pendingShutdownTimer) clearTimeout(pendingShutdownTimer);
     pendingShutdownTimer = setTimeout(() => {
-      exitOnce(reason);
+      exitOnce(reason, feedbackPayload);
     }, delayMs);
   }
 
@@ -156,22 +147,27 @@ export async function startPlanPreviewer(filePath, options = {}) {
   }
 
   app.use((req, res, next) => {
-    cancelPendingShutdown();
+    // Only cancel shutdown for non-shutdown requests
+    if (req.path !== '/api/shutdown') {
+      cancelPendingShutdown();
+    }
     next();
   });
 
   idleInterval = setInterval(() => {
-    if (clientConnected && Date.now() - lastHeartbeat > 600000) {
-      exitOnce(pc.yellow('\nPlan previewer idle timeout completed. Shutting down.'));
+    if (clientConnected && Date.now() - lastHeartbeat > 12000) {
+      exitOnce(pc.yellow('\nPlan previewer tab closed. Server shut down cleanly.'), { closed: true, exit: true });
     }
-  }, 15000);
+  }, 2000);
+
+  let actualPort = null;
 
   // Status check endpoint for CLI single-instance verification
   app.get('/api/status', (req, res) => {
     res.json({
       success: true,
       running: true,
-      port: preferredPort,
+      port: actualPort || preferredPort,
       pid: process.pid,
       planFile: currentPlanPath,
       sessionContext,
@@ -198,11 +194,12 @@ export async function startPlanPreviewer(filePath, options = {}) {
       });
     }
     fileVersion++;
-    writeActiveSessionMarker(currentPlanPath, preferredPort);
+    const currentPort = actualPort || preferredPort;
+    writeSessionMarker(currentPlanPath, currentPort, process.pid);
 
-    if (shouldOpen !== false && preferredPort && !tabOpened) {
+    if (!options.testMode && options.open !== false && shouldOpen === true && currentPort && !tabOpened) {
       tabOpened = true;
-      try { openBrowser(`http://localhost:${preferredPort}`); } catch (e) {}
+      try { openBrowser(`http://localhost:${currentPort}`); } catch (e) {}
     }
 
     res.json({ success: true, fileVersion, planFile: currentPlanPath });
@@ -233,11 +230,17 @@ export async function startPlanPreviewer(filePath, options = {}) {
 
   app.post('/api/shutdown', (req, res) => {
     res.json({ ok: true, message: 'Server scheduling shutdown' });
-    scheduleShutdown(pc.yellow('\nViewer closed by user. Server shut down cleanly.'), 1500);
+    scheduleShutdown(pc.yellow('\nViewer closed by user. Server shut down cleanly.'), 2500, { closed: true, exit: true });
   });
 
   app.get('/api/version', (req, res) => {
-    res.json({ fileVersion });
+    let mtime = 0;
+    try {
+      if (fs.existsSync(currentPlanPath)) {
+        mtime = fs.statSync(currentPlanPath).mtimeMs;
+      }
+    } catch (e) {}
+    res.json({ fileVersion, mtime, planFile: currentPlanPath });
   });
 
   app.get('/api/plan', (req, res) => {
@@ -339,6 +342,7 @@ export async function startPlanPreviewer(filePath, options = {}) {
     server = app.listen(preferredPort, async () => {
       trackSockets(server);
       const port = server.address().port;
+      actualPort = port;
       const url = `http://localhost:${port}`;
       if (!options.silent) {
         console.log(pc.bold(pc.cyan('\n Plan Previewer Daemon Active')));
@@ -347,9 +351,9 @@ export async function startPlanPreviewer(filePath, options = {}) {
         console.log(`${pc.bold('Viewer URL:')} ${pc.underline(pc.blue(url))}\n`);
       }
 
-      writeActiveSessionMarker(currentPlanPath, port);
+      writeSessionMarker(currentPlanPath, port, process.pid);
 
-      if (options.open !== false) {
+      if (!options.testMode && options.open !== false) {
         tabOpened = true;
         try {
           await openBrowser(url);
@@ -371,12 +375,13 @@ export async function startPlanPreviewer(filePath, options = {}) {
         server = app.listen(0, async () => {
           trackSockets(server);
           const dynamicPort = server.address().port;
+          actualPort = dynamicPort;
           const url = `http://localhost:${dynamicPort}`;
           if (!options.silent) {
             console.log(pc.bold(pc.cyan(`\n Plan Previewer Daemon Active on port ${dynamicPort}`)));
           }
-          writeActiveSessionMarker(currentPlanPath, dynamicPort);
-          if (options.open !== false) {
+          writeSessionMarker(currentPlanPath, dynamicPort, process.pid);
+          if (!options.testMode && options.open !== false) {
             tabOpened = true;
             try { await openBrowser(url); } catch (e) {}
           }
