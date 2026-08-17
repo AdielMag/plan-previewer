@@ -22,7 +22,7 @@
   <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/diff@5/dist/diff.min.js"></script>
   
-  <link rel="stylesheet" href="styles.css?v=9">
+  <link rel="stylesheet" href="styles.css?v=14">
 </head>
 <body>
 
@@ -196,9 +196,13 @@
 
     <!-- Bottom Action Footer -->
     <footer class="footer-bar">
-      <div class="footer-input-row">
+      <!-- Agent questionnaire takeover: replaces the comment box while the
+           agent is waiting on answers (CLI-style options + free text). -->
+      <div class="footer-ask-mode" id="footerAskMode" style="display: none;"></div>
+
+      <div class="footer-input-row" id="footerInputRow">
         <textarea id="footerComment" placeholder="Overall comments for the agent — changes needed, context, or notes…"></textarea>
-        
+
         <button class="footer-btn btn-changes" id="btnRequestChanges">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
           <span>Request changes</span>
@@ -227,6 +231,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=9"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>

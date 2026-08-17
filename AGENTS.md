@@ -23,6 +23,17 @@ Plan Previewer has two distinct triggers - know which one applies before you lau
 - **Phase A - Before execution (mandatory).** Any time you write or revise a markdown plan file like `plan.md` or `PLAN.md` for approval - the first draft and every `changes_requested`/`questions_asked` revision round - you must run the protocol below.
 - **Phase B - After approval (execution phase).** Once `status` is `"approved"` and you've started executing, do NOT re-launch Plan Previewer just because the plan file changed again (checking off `- [x]` tasks, appending progress notes, etc). Only launch it again if you deliberately want to show the user something or ask them a question mid-execution - treat that as a fresh Phase A round, run the same protocol, don't just send a plain chat message instead.
 
+### Never ask questions in chat - use `--ask`
+
+While a previewer session is open, do not ask the user anything in the CLI/chat (no questionnaire tool). Push the question into the already-open tab:
+
+```bash
+npx plan-previewer ./plan.md --ask="Should we ship behind a feature flag?"
+npx plan-previewer ./plan.md --ask-file=./.plan-questions.json
+```
+
+The user answers in the same tab, and you receive `status: "answered"` plus an `answers[]` array in `.plan-feedback.json` (also printed as `[PLAN-ANSWERS]`). The daemon stays alive after approval so execution-phase questions reuse the same tab.
+
 ### Protocol (both phases)
 
 1. Run:

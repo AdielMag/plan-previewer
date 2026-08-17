@@ -9,6 +9,7 @@ It allows agents to open rendered markdown plans in a browser interface where us
 - Beautifully prettifies markdown plans with task progress bars, code highlighting, and metadata badges.
 - Enables live side-by-side plan editing and instant preview updates.
 - Supports inline section questions and bottom comment submission directly back to the calling agent.
+- Lets the agent ask the user questions inside the open tab via `--ask` / `--ask-file` / `.plan-questions.json`, instead of asking in the CLI or chat, and returns the answers as `answers[]` in `.plan-feedback.json`.
 - Offers interactive CLI skill installation for both Claude Code and Antigravity agent environments.
 
 ## Repository Structure
@@ -16,6 +17,7 @@ It allows agents to open rendered markdown plans in a browser interface where us
 - `bin/plan-previewer.js`: CLI launcher binary that starts the local web server and opens the browser.
 - `src/server.js`: Express server and real-time API layer handling markdown I/O and feedback events.
 - `src/detector.js`: Caller environment detection logic for Claude Code vs Antigravity.
+- `src/ask-parser.js`: Normalizes agent questions from `--ask`, `--ask-file`, and `.plan-questions.json` into the shape the server and browser render.
 - `public/`: Frontend static web application featuring modern markdown rendering, editor, and feedback interface.
 - `skills/plan-previewer/SKILL.md`: Skill definition installed into agent directories.
 - `scripts/install-skills.js`: Skill installer prompt script for agent setup. Also installs the Claude Code enforcement hook.
@@ -33,3 +35,4 @@ It allows agents to open rendered markdown plans in a browser interface where us
 - Always ensure one full sentence per line when writing markdown documentation files.
 - Never use em dashes anywhere in code or documentation.
 - Maintain dual agent support for both Claude Code and Antigravity.
+- Never ask the user a question in the CLI or chat while a Plan Previewer session is open. Send it with `--ask` so it is answered in the same tab.

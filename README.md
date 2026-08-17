@@ -12,6 +12,7 @@ It provides an automated web interface for previewing rendered markdown plans, s
 - **Summary & Full View Modes**: Toggle between a **Summary View** (30-second scan: hides deep-dive `<details>` accordions, code blocks, and tables for an executive digest) and a **Full View** (everything expanded) directly from the header.
 - **Decisions Tray**: All `[!CHOICE]` and `[!QUESTION]` blocks in a plan are automatically grouped into a single, compact **Decisions** tray with `D1`/`D2`/`Q1`-style badges, a live "X of Y resolved" counter, and collapsible rows that preview the current selection or answer when closed.
 - **Interactive Choice Cards & Open Questions**: `[!CHOICE]` and `[!QUESTION]` blocks render as radio-style option rows with `[Recommended]` badge parsing, Answered/Unanswered chips, and explicit **Clear** controls.
+- **In-Tab Agent Questions (`--ask`)**: When the agent needs input it never asks in the CLI/chat - it pushes questions into the already-open previewer tab (`--ask="..."`, `--ask-file=...`, or `.plan-questions.json`). They render as an *"<Agent> needs your input"* panel with radio options and free-text fields; the user answers in place and the answers return to the agent as `answers[]` in `.plan-feedback.json`. The session also stays alive after approval, so execution-phase questions reuse the same tab instead of spawning a new one.
 - **Agent Change Summaries & Changelogs**: When an agent addresses requested changes, it can supply an authored explanation of what was changed via `--response="..."` or `.plan-response.md`. The web UI renders this explanation as the primary response bubble in the activity feed alongside line diff statistics (+N / −M lines).
 - **Responsive Layout & Width Switcher**:
   - **Narrow (Comfortable)**: 820px centered reading column.
@@ -113,6 +114,21 @@ Or read response notes from a file:
 plan-previewer ./plan.md --response-file="./.plan-response.md"
 ```
 
+Ask the user a question **inside the open previewer tab** (never in chat):
+
+```bash
+# free-text question
+plan-previewer ./plan.md --ask="Should we ship behind a feature flag?"
+
+# multiple-choice question (inline JSON)
+plan-previewer ./plan.md --ask='{"id":"cache","type":"choice","title":"Cache backend","question":"Which store?","options":[{"label":"Redis","recommended":true},{"label":"SQLite"}]}'
+
+# batch of questions from a file (JSON, or markdown [!QUESTION]/[!CHOICE] blocks)
+plan-previewer ./plan.md --ask-file=./.plan-questions.json
+```
+
+Answers come back in `.plan-feedback.json` as `status: "answered"` with an `answers[]` array, and are printed to stdout as `[PLAN-ANSWERS]`.
+
 Explicitly override caller agent detection:
 
 ```bash
@@ -129,6 +145,8 @@ plan-previewer ./plan.md --agent=antigravity
 | `-c`, `--context=<string>` | Task goal or session context summary | First `# Heading` |
 | `-r`, `--response="<string>"` | Explanation of changes made in response to user feedback | None |
 | `--response-file="<path>"` | Path to markdown file containing change response notes | Auto `.plan-response.md` |
+| `--ask="<question\|json>"` | Ask the user a question inside the previewer tab (repeatable) | None |
+| `--ask-file="<path>"` | Read questions from JSON or markdown blocks | Auto `.plan-questions.json` |
 | `--agent=<claude\|antigravity\|pi>` | Explicitly set calling agent | Auto-detected |
 | `--wait-timeout=<seconds>` | Max wait for a review decision before exiting | 240 under Pi CLI, otherwise unbounded |
 | `-p`, `--port=<number>` | Local HTTP server port | `3456` |

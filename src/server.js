@@ -6,6 +6,7 @@ import pc from 'picocolors';
 import openBrowser from 'open';
 import { detectCallerAgent } from './detector.js';
 import { writeSessionMarker, clearSessionMarker } from './session-port.js';
+import { normalizeQuestions, buildQuestionRound } from './ask-parser.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,6 +35,23 @@ export async function startPlanPreviewer(filePath, options = {}) {
     : [];
 
   let fileVersion = 1;
+  let questionRoundId = 0;
+  // Rounds of questions the agent pushed into this live session. They are
+  // answered by the user in the same tab, never in the CLI.
+  let agentQuestions = [];
+  let planApproved = false;
+
+  function pushQuestionRound(rawQuestions) {
+    const questions = normalizeQuestions(rawQuestions);
+    if (!questions.length) return null;
+    questionRoundId++;
+    const round = buildQuestionRound(questions, { roundId: questionRoundId, fileVersion: fileVersion + 1 });
+    agentQuestions.push(round);
+    return round;
+  }
+
+  if (options.questions) pushQuestionRound(options.questions);
+
   let selfWriteUntil = 0;
   let server = null;
   let activeWatcher = null;
@@ -174,12 +192,14 @@ export async function startPlanPreviewer(filePath, options = {}) {
       callerAgent,
       fileVersion,
       agentResponses,
+      agentQuestions,
+      planApproved,
     });
   });
 
   // Notify endpoint for CLI callers to update plan file without starting duplicate server
   app.post('/api/notify', (req, res) => {
-    const { filePath, context, agent, response, open: shouldOpen } = req.body;
+    const { filePath, context, agent, response, questions, open: shouldOpen } = req.body;
     if (filePath) {
       currentPlanPath = path.resolve(process.cwd(), filePath);
       attachWatcher(currentPlanPath);
@@ -193,6 +213,7 @@ export async function startPlanPreviewer(filePath, options = {}) {
         fileVersion: fileVersion + 1,
       });
     }
+    if (questions) pushQuestionRound(questions);
     fileVersion++;
     const currentPort = actualPort || preferredPort;
     writeSessionMarker(currentPlanPath, currentPort, process.pid);
@@ -202,7 +223,7 @@ export async function startPlanPreviewer(filePath, options = {}) {
       try { openBrowser(`http://localhost:${currentPort}`); } catch (e) {}
     }
 
-    res.json({ success: true, fileVersion, planFile: currentPlanPath });
+    res.json({ success: true, fileVersion, planFile: currentPlanPath, agentQuestions });
   });
 
   // Long-polling feedback wait endpoint for CLI callers
@@ -258,6 +279,8 @@ export async function startPlanPreviewer(filePath, options = {}) {
         callerAgent,
         sessionContext,
         agentResponses,
+        agentQuestions,
+        planApproved,
       });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
@@ -280,7 +303,19 @@ export async function startPlanPreviewer(filePath, options = {}) {
 
   app.post('/api/feedback', (req, res) => {
     try {
-      const { status, comment, questions, choices, content } = req.body;
+      const { status, comment, questions, choices, content, answers } = req.body;
+
+      const agentAnswers = Array.isArray(answers) ? answers : [];
+      if (agentAnswers.length) {
+        const answeredRounds = new Set(agentAnswers.map((a) => a.roundId));
+        agentQuestions.forEach((round) => {
+          if (answeredRounds.has(round.roundId)) {
+            round.status = 'answered';
+            round.answers = agentAnswers.filter((a) => a.roundId === round.roundId);
+            round.answeredAt = new Date().toISOString();
+          }
+        });
+      }
 
       if (typeof content === 'string') {
         writePlanFile(content);
@@ -297,6 +332,7 @@ export async function startPlanPreviewer(filePath, options = {}) {
         comment: comment || '',
         questions: Array.isArray(questions) ? questions : [],
         choices: Array.isArray(choices) ? choices : [],
+        answers: agentAnswers,
       };
 
       const dir = path.dirname(currentPlanPath);
@@ -326,10 +362,16 @@ export async function startPlanPreviewer(filePath, options = {}) {
 
       const qCount = feedbackData.questions.length;
       const cCount = feedbackData.choices.length;
-      console.log(`\n[PLAN-REVIEW]: status=${status.toUpperCase()} | comment="${comment || 'None'}" | questions=${qCount} | choices=${cCount} | saved=.plan-feedback.json\n`);
+      const aCount = feedbackData.answers.length;
+      console.log(`\n[PLAN-REVIEW]: status=${status.toUpperCase()} | comment="${comment || 'None'}" | questions=${qCount} | choices=${cCount} | answers=${aCount} | saved=.plan-feedback.json\n`);
 
       if (status === 'approved') {
-        scheduleShutdown(pc.green('Plan approved by user. Server shutting down.'), 1500);
+        // Stay alive in an "executing" state so mid-execution agent questions
+        // (--ask) land in THIS tab instead of cold-starting a new one.
+        // The idle-heartbeat watchdog still shuts us down once the user
+        // actually closes the tab.
+        planApproved = true;
+        if (!options.silent) console.log(pc.green('Plan approved by user. Keeping session alive for execution-phase questions.'));
       }
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
@@ -418,6 +460,16 @@ function generateFeedbackMarkdown(data) {
 
   if (data.comment) {
     md += `## User Feedback & Comments\n\n${data.comment}\n\n`;
+  }
+
+  if (data.answers && data.answers.length > 0) {
+    md += `## Answers To Your Questions\n\n`;
+    data.answers.forEach((a, i) => {
+      md += `### ${i + 1}. ${a.title || a.question || a.id}\n`;
+      if (a.question && a.question !== a.title) md += `> ${a.question}\n\n`;
+      const value = a.selected || a.answer || '(skipped by user)';
+      md += `- **Answer:** ${value}\n\n`;
+    });
   }
 
   if (data.choices && data.choices.length > 0) {

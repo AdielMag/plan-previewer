@@ -10,6 +10,36 @@ Plan Previewer has two distinct triggers - know which one applies before you lau
 - **Phase A - Before execution (mandatory).** Any time you are authoring or revising a markdown plan file (e.g. `plan.md`, `PLAN.md`) for approval - including the first draft and every `changes_requested`/`questions_asked` revision round - you MUST follow the protocol below before proceeding.
 - **Phase B - After approval (execution phase).** Once `status` is `"approved"` and you've started executing, do NOT re-launch Plan Previewer just because the plan file changed again (checking off `- [x]` tasks, appending progress notes, etc). Only launch it again if you have a deliberate, standalone reason to show the user something or ask them a question mid-execution (a blocking decision, a checkpoint, a final summary). When that happens, run the exact same protocol again - don't fall back to a plain chat message instead.
 
+## Rule Zero: never ask the user questions in chat
+
+While a Plan Previewer session is open (Phase A **or** Phase B), you MUST NOT ask the user anything in the CLI/chat - no questionnaire tool, no "which option do you prefer?" message. That splits the conversation across two surfaces and destroys the review context and activity stream. Push the question into the **already-open tab** instead:
+
+```bash
+# free-text question
+npx plan-previewer ./plan.md --ask="Should we ship behind a feature flag?"
+
+# multiple-choice question (inline JSON, repeatable)
+npx plan-previewer ./plan.md --ask='{"id":"cache","type":"choice","title":"Cache backend","question":"Which store should the cache layer use?","options":[{"label":"Redis","description":"Fast, pub/sub","recommended":true},{"label":"SQLite","description":"Zero deps"}]}'
+
+# many questions at once
+npx plan-previewer ./plan.md --ask-file=./.plan-questions.json
+```
+
+- Questions appear as an **"<Agent> needs your input"** panel at the top of the same tab, mirrored in the Activity sidebar. `Approve` stays disabled until they are answered.
+- The user's answers come back in `.plan-feedback.json` as `status: "answered"` + `answers[]` (each with `selected` or `answer`), and are printed as `[PLAN-ANSWERS]` on stdout.
+- A `.plan-questions.json` file next to the plan is picked up automatically and consumed (deleted) after being asked once.
+- The daemon stays alive after approval, so Phase B (`--ask` during execution) reuses the same tab - it never opens a new one.
+
+`.plan-questions.json` schema:
+
+```json
+[
+  { "id": "q1", "type": "choice", "title": "Cache backend", "question": "Which store?",
+    "options": [{ "label": "Redis", "description": "Fast", "recommended": true }, { "label": "SQLite" }] },
+  { "id": "q2", "type": "text", "title": "Rollout", "question": "Any deploy window constraints?" }
+]
+```
+
 ## Protocol (both phases)
 
 0. **Apply the `rich-plan-formatting` skill to the plan content first.** Before launching the previewer, structure the plan with two distinct text sections (`<!-- SUMMARY -->` for a 30-second executive digest, and `<!-- FULL -->` for the complete technical blueprint, along with choice/question blocks, alert callouts, and status badges) - Plan Previewer renders these as switchable views with tailored navigation.
@@ -29,6 +59,7 @@ Plan Previewer has two distinct triggers - know which one applies before you lau
    - Once the command exits, check `.plan-feedback.json` (or `.plan-feedback.md`) next to the plan file.
    - If it doesn't exist yet, or its `status` is the same one you already handled in a previous round (nothing new since your last check): the user simply hasn't responded yet. **Just re-run the exact same command again** and keep waiting — repeat as many times as it takes, there is no limit.
    - If `status` is `"approved"`, proceed with executing the plan (Phase B), and stop re-launching Plan Previewer for routine plan-file edits from here on.
+   - If `status` is `"answered"`, read `answers[]`, apply them, and re-run the command (adding `--response="..."`) so the user sees the result in the same tab. If you still need input, re-run with `--ask="..."` - never fall back to asking in chat.
    - If `status` is `"changes_requested"` or `"questions_asked"` **and you haven't already addressed it**, address the user's comments/questions, update the plan file, then re-run the exact same command (same plan file, default port). The already-open browser tab detects the server coming back and shows your update in place automatically — you do not need to open a new tab or tell the user to do anything.
 
 4. **This is enforced, not optional, on Claude Code.** A `PreToolUse` hook on `ExitPlanMode`, installed alongside this skill, blocks exiting plan mode unless a fresh, `"approved"` `.plan-feedback.json` exists next to the plan file. This hook only guards Phase A (leaving plan mode); it does not require re-running Plan Previewer for every Phase B plan-file edit. Do not reason your way past steps 1-3 during Phase A.

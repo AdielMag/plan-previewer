@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import pc from 'picocolors';
 import { resolveWaitTimeoutSec } from '../src/wait-timeout.js';
 import { findSessionPort, probeServerForPlan } from '../src/session-port.js';
+import { parseAskArg, parseAskFileContent } from '../src/ask-parser.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -55,6 +56,7 @@ function parseArgs() {
     open: true,
     port: null,
     agent: null,
+    questions: [],
   };
 
   let filePath = null;
@@ -83,6 +85,15 @@ function parseArgs() {
       options.response = arg.split('=').slice(1).join('=');
     } else if (arg === '-r' || arg === '--response') {
       options.response = args[++i];
+    } else if (arg.startsWith('--ask=')) {
+      options.questions.push(...parseAskArg(arg.split('=').slice(1).join('=')));
+    } else if (arg === '--ask') {
+      options.questions.push(...parseAskArg(args[++i]));
+    } else if (arg.startsWith('--ask-file=')) {
+      const aFile = arg.split('=').slice(1).join('=');
+      try {
+        if (fs.existsSync(aFile)) options.questions.push(...parseAskFileContent(fs.readFileSync(aFile, 'utf8')));
+      } catch (e) {}
     } else if (arg.startsWith('--response-file=')) {
       const rFile = arg.split('=').slice(1).join('=');
       try {
@@ -126,6 +137,29 @@ function parseArgs() {
     }
   }
 
+  // Automatic pickup of .plan-questions.json (consumed after ingest, so the
+  // same questions are never asked twice).
+  if (options.questions.length === 0) {
+    const planDir = filePath ? path.dirname(path.resolve(process.cwd(), filePath)) : process.cwd();
+    const autoAskFiles = [
+      path.join(planDir, '.plan-questions.json'),
+      path.join(planDir, '.plan-questions.md'),
+      path.join(process.cwd(), '.plan-questions.json'),
+    ];
+    for (const af of autoAskFiles) {
+      if (fs.existsSync(af)) {
+        try {
+          const parsed = parseAskFileContent(fs.readFileSync(af, 'utf8'));
+          if (parsed.length) {
+            options.questions = parsed;
+            options.consumedAskFile = af;
+            break;
+          }
+        } catch (e) {}
+      }
+    }
+  }
+
   return { filePath, options };
 }
 
@@ -145,6 +179,12 @@ ${pc.bold('Options:')}
                                 otherwise waits until the harness's own timeout.
   -r, --response="<summary>"    Explain changes made in response to user requests
   --response-file="<path>"      Read change response notes from a markdown file
+  --ask="<question>"            Ask the user a question INSIDE the previewer tab
+                                (repeatable). Never ask in chat/CLI during review.
+  --ask-file="<path>"           Read questions from JSON or markdown
+                                ([!QUESTION]/[!CHOICE] blocks). A
+                                .plan-questions.json next to the plan is picked
+                                up automatically and consumed.
   --no-open                     Do not automatically open browser tab
   -h, --help                    Show this help message
 `);
@@ -180,6 +220,14 @@ function spawnDetachedServer(filePath, options) {
   if (options.context) args.push(`--context=${options.context}`);
   if (options.agent) args.push(`--agent=${options.agent}`);
   if (options.response) args.push(`--response=${options.response}`);
+  if (options.questions && options.questions.length) {
+    // Arrays don't survive argv cleanly - hand them over via a temp file.
+    try {
+      const tmpAsk = path.join(os.tmpdir(), `plan-previewer-ask-${process.pid}.json`);
+      fs.writeFileSync(tmpAsk, JSON.stringify(options.questions), 'utf8');
+      args.push(`--ask-file=${tmpAsk}`);
+    } catch (e) {}
+  }
   if (options.open === false) args.push('--no-open');
 
   const child = spawn(process.execPath, args, {
@@ -215,9 +263,11 @@ async function main() {
 
   let running = sessionInfo.isRunning;
   const wasAlreadyRunning = running;
+  let spawnedByUs = false;
 
   if (!running) {
     const isSpawner = tryAcquireSpawnLock(port);
+    spawnedByUs = isSpawner;
     if (isSpawner) spawnDetachedServer(filePath, { ...options, port });
     // A cold `npx` invocation can take well over 4s to resolve/install deps and
     // bind the port, especially on Windows. Give it a longer bounded window
@@ -247,6 +297,9 @@ async function main() {
           context: options.context,
           agent: options.agent,
           response: options.response,
+          // The daemon we just spawned already seeded these from --ask-file;
+          // re-sending them here would ask the user the same thing twice.
+          questions: spawnedByUs ? [] : options.questions,
           // Only the initial spawner of a new server opens the browser tab.
           // Reconnects / notify calls must never reopen browser tabs.
           open: false,
@@ -254,6 +307,17 @@ async function main() {
       });
       console.log(pc.bold(pc.cyan(`\n🚀 Plan Previewer Connected (Server active on port ${port})`)));
       console.log(`${pc.bold('Target Plan:')} ${absolutePath}\n`);
+      if (options.questions.length) {
+        console.log(
+          pc.magenta(
+            `Sent ${options.questions.length} question(s) to the previewer tab. ` +
+              'Waiting for the user to answer them there (do NOT ask in chat).\n'
+          )
+        );
+        if (options.consumedAskFile) {
+          try { fs.unlinkSync(options.consumedAskFile); } catch (e) {}
+        }
+      }
     } catch (err) {}
 
     const timeoutSec = resolveWaitTimeoutSec(options);
@@ -264,6 +328,14 @@ async function main() {
       console.log(
         `\n[PLAN-REVIEW]: status=${fb.status.toUpperCase()} | comment="${fb.comment || 'None'}" | saved=.plan-feedback.json\n`
       );
+      if (Array.isArray(fb.answers) && fb.answers.length) {
+        console.log(pc.bold(pc.magenta('[PLAN-ANSWERS]: user answered your questions in the previewer:')));
+        fb.answers.forEach((a, i) => {
+          const value = a.selected || a.answer || '(skipped)';
+          console.log(`  ${i + 1}. ${a.question || a.title || a.id} -> ${value}`);
+        });
+        console.log('');
+      }
     } else if (data && (data.closed || data.exit)) {
       console.log(
         pc.yellow(

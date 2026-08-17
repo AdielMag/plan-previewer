@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { startPlanPreviewer } from './server.js';
+import { parseAskFileContent, parseAskArg } from './ask-parser.js';
 
 const args = process.argv.slice(2);
 const filePath = args[0] || 'plan.md';
@@ -8,6 +9,7 @@ const filePath = args[0] || 'plan.md';
 const options = {
   open: true,
   port: 3456,
+  questions: [],
 };
 
 for (let i = 1; i < args.length; i++) {
@@ -26,6 +28,17 @@ for (let i = 1; i < args.length; i++) {
     const rFile = arg.split('=').slice(1).join('=');
     try {
       if (fs.existsSync(rFile)) options.response = fs.readFileSync(rFile, 'utf8').trim();
+    } catch (e) {}
+  } else if (arg.startsWith('--ask=')) {
+    options.questions.push(...parseAskArg(arg.split('=').slice(1).join('=')));
+  } else if (arg.startsWith('--ask-file=')) {
+    const aFile = arg.split('=').slice(1).join('=');
+    try {
+      if (fs.existsSync(aFile)) {
+        options.questions.push(...parseAskFileContent(fs.readFileSync(aFile, 'utf8')));
+        // Temp hand-off files from the CLI spawner are single-use.
+        if (path.basename(aFile).startsWith('plan-previewer-ask-')) fs.unlinkSync(aFile);
+      }
     } catch (e) {}
   }
 }

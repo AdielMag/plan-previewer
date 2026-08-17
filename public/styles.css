@@ -2285,3 +2285,434 @@ details.styled-details > *:not(summary):last-child {
   margin: 0 0 20px;
   line-height: 1.5;
 }
+
+
+/* ============================================================
+   Agent questionnaire: footer takeover + activity chat bubble
+   The agent's questions arrive like a chat message and are
+   answered in the footer, never inside the plan document.
+   ============================================================ */
+
+/* The footer bar is a flex row, so the strip must claim the whole row and
+   then center its own content on the same column grid as the document. */
+.footer-bar.footer-ask-active {
+  padding: 0;
+  display: block;
+  overflow-x: hidden;
+}
+
+.footer-ask-mode {
+  width: 100%;
+  flex: 1 1 100%;
+  box-sizing: border-box;
+  border-top: 2px solid var(--accent-color);
+  background: var(--bg-callout);
+  padding: 12px 0 14px;
+  animation: askSlideIn 0.18s ease-out;
+}
+
+.footer-ask-mode > * {
+  width: 100%;
+  max-width: var(--doc-max-width, 1160px);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 20px;
+  padding-right: 20px;
+  box-sizing: border-box;
+}
+
+@keyframes askSlideIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.footer-ask-mode.highlight-flash {
+  box-shadow: inset 0 0 0 2px var(--accent-color);
+}
+
+.ask-strip-header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 8px;
+}
+
+.ask-strip-who {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.ask-strip-tabs {
+  display: flex;
+  gap: 4px;
+  margin-left: 2px;
+}
+
+.ask-tab {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 20px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.ask-tab:hover { border-color: var(--accent-color); }
+
+.ask-tab-active {
+  border-color: var(--accent-color);
+  background: var(--accent-color);
+  color: var(--text-inverse);
+}
+
+.ask-tab-done:not(.ask-tab-active) {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.ask-strip-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.ask-strip-later {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ask-strip-later:hover { color: var(--text-primary); }
+
+.ask-strip-body {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.ask-strip-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.ask-strip-question {
+  font-size: 12.8px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin: 2px 0 8px;
+  white-space: pre-wrap;
+}
+
+.ask-strip-options {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ask-option-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.ask-option-row:hover { border-color: var(--accent-color); }
+
+.ask-option-row-selected {
+  border-color: var(--accent-color);
+  background: var(--accent-light);
+}
+
+.ask-option-key {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  padding: 1px 6px;
+  flex-shrink: 0;
+}
+
+.ask-option-row-selected .ask-option-key {
+  color: var(--accent-color);
+  border-color: var(--accent-color);
+}
+
+.ask-option-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.ask-option-label {
+  font-size: 12.8px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.ask-option-rec {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-color);
+  border: 1px solid var(--accent-color);
+  border-radius: 20px;
+  padding: 1px 6px;
+}
+
+.ask-option-desc {
+  font-size: 11.6px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.ask-option-other { cursor: text; }
+
+.ask-other-input,
+.ask-strip-textarea {
+  flex: 1;
+  width: 100%;
+  font-family: inherit;
+  font-size: 12.8px;
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: vertical;
+}
+
+.ask-strip-textarea {
+  background: var(--bg-input);
+  border: 1px solid var(--bg-input-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  line-height: 1.5;
+}
+
+.ask-strip-textarea:focus { border-color: var(--accent-color); }
+
+.ask-strip-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ask-strip-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-right: auto;
+}
+
+.ask-nav-btn {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.ask-nav-btn:hover:not(:disabled) { border-color: var(--accent-color); }
+.ask-nav-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-answers {
+  background: var(--accent-color);
+  color: var(--text-inverse);
+  border: 1px solid var(--accent-color);
+}
+
+.btn-answers:hover:not(:disabled) { filter: brightness(0.94); }
+
+.btn-answers:disabled, .btn-answers.btn-disabled {
+  opacity: 0.45 !important;
+  cursor: not-allowed !important;
+  pointer-events: none !important;
+}
+
+/* Activity sidebar: the agent's question message (always last in the stream) */
+.chat-stream-tail { margin-top: 8px; }
+
+.bubble-ask {
+  border-color: var(--accent-color) !important;
+  cursor: pointer;
+}
+
+.bubble-tag-ask {
+  background: var(--accent-light);
+  color: var(--accent-color);
+  border: 1px solid var(--accent-color);
+}
+
+.ask-bubble-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.ask-bubble-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: var(--bg-card2);
+  cursor: pointer;
+}
+
+.ask-bubble-item:hover { background: var(--accent-light); }
+
+.ask-bubble-item-done { box-shadow: inset 2px 0 0 var(--green); }
+
+.ask-bubble-index {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.ask-bubble-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ask-bubble-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.ask-bubble-answer {
+  font-size: 11.2px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ask-bubble-item-done .ask-bubble-answer { color: var(--green); }
+
+.ask-bubble-cta {
+  margin-top: 8px;
+  width: 100%;
+  font-size: 11.8px;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--accent-color);
+  background: var(--accent-color);
+  color: var(--text-inverse);
+  cursor: pointer;
+}
+
+.ask-bubble-cta:hover { filter: brightness(0.94); }
+
+/* ---- Footer questionnaire: overflow hardening -------------------------
+   This stylesheet has no global border-box reset, so 100%-wide buttons and
+   inputs with padding were overflowing the bar and forcing a horizontal
+   scrollbar that covered the last option. Everything inside the strip is
+   border-box, may shrink, and never scrolls sideways. */
+
+.footer-ask-mode,
+.footer-ask-mode * {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+.footer-ask-mode {
+  overflow-x: hidden;
+}
+
+.ask-strip-header {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.ask-strip-who,
+.ask-strip-count,
+.ask-strip-later {
+  flex-shrink: 0;
+}
+
+.ask-strip-tabs {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.ask-strip-body {
+  max-height: min(46vh, 320px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  /* Thin, unobtrusive scrollbar only when the question list is genuinely tall */
+  scrollbar-width: thin;
+}
+
+.ask-strip-body::-webkit-scrollbar {
+  width: 6px;
+  height: 0;            /* never a horizontal bar */
+}
+
+.ask-strip-body::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+}
+
+.ask-strip-question,
+.ask-option-label,
+.ask-option-desc,
+.ask-bubble-answer {
+  overflow-wrap: anywhere;
+}
+
+.ask-option-main,
+.ask-bubble-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.ask-strip-actions {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.ask-strip-hint {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* The activity sidebar bubbles must not push a horizontal bar either */
+.ask-bubble-list,
+.ask-bubble-item,
+.ask-bubble-cta {
+  box-sizing: border-box;
+  max-width: 100%;
+}

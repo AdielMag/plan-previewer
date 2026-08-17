@@ -71,6 +71,110 @@ const QuestionnaireParams = Type.Object({
 	questions: Type.Array(QuestionSchema, { description: "Questions to ask the user" }),
 });
 
+/* --------------------------------------------------------------------- *
+ * Plan Previewer redirect
+ *
+ * If a Plan Previewer session is live, questions must NOT be asked in the
+ * terminal - that splits the conversation across two surfaces and breaks the
+ * review context. We push them into the open browser tab instead and wait for
+ * the user to answer them there.
+ * --------------------------------------------------------------------- */
+
+interface LiveSession {
+	port: number;
+	planFile: string;
+}
+
+async function findLivePreviewerSession(cwd: string): Promise<LiveSession | null> {
+	try {
+		const fs = await import("node:fs");
+		const path = await import("node:path");
+
+		const markers = fs
+			.readdirSync(cwd)
+			.filter((f) => f.startsWith(".plan-previewer-") && f.endsWith(".session.json"));
+
+		const candidates: { port: number; planFile: string }[] = [];
+		for (const marker of markers) {
+			try {
+				const data = JSON.parse(fs.readFileSync(path.join(cwd, marker), "utf8"));
+				if (data && data.port) candidates.push({ port: data.port, planFile: data.planFile });
+			} catch (e) {}
+		}
+		if (candidates.length === 0) candidates.push({ port: 3456, planFile: "" });
+
+		for (const candidate of candidates) {
+			try {
+				const res = await fetch(`http://localhost:${candidate.port}/api/status`);
+				if (!res.ok) continue;
+				const status = await res.json();
+				if (status && status.running) {
+					return { port: candidate.port, planFile: status.planFile || candidate.planFile };
+				}
+			} catch (e) {}
+		}
+	} catch (e) {}
+	return null;
+}
+
+async function askInPreviewer(
+	session: LiveSession,
+	questions: Question[],
+	signal?: AbortSignal,
+): Promise<QuestionnaireResult | null> {
+	const payload = questions.map((q) => ({
+		id: q.id,
+		type: q.options && q.options.length > 0 ? "choice" : "text",
+		title: q.label || q.id,
+		question: q.prompt,
+		options: (q.options || []).map((o) => ({ label: o.label, description: o.description })),
+	}));
+
+	try {
+		const notify = await fetch(`http://localhost:${session.port}/api/notify`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ questions: payload, open: false }),
+		});
+		if (!notify.ok) return null;
+	} catch (e) {
+		return null;
+	}
+
+	// Long-poll until the user answers in the browser tab.
+	const deadline = Date.now() + 30 * 60 * 1000;
+	while (Date.now() < deadline && !signal?.aborted) {
+		try {
+			const query = `timeout=120&planFile=${encodeURIComponent(session.planFile || "")}`;
+			const res = await fetch(`http://localhost:${session.port}/api/wait-feedback?${query}`);
+			const data = await res.json();
+
+			if (data && data.feedback && Array.isArray(data.feedback.answers) && data.feedback.answers.length > 0) {
+				const answers: Answer[] = data.feedback.answers
+					.filter((a: any) => a.selected || a.answer)
+					.map((a: any) => {
+						const question = questions.find((q) => q.id === a.id);
+						const value = a.selected || a.answer;
+						const matched = question?.options?.find((o) => o.label === value);
+						return {
+							id: a.id,
+							value: matched ? matched.value : value,
+							label: a.note ? `${value} (${a.note})` : value,
+							wasCustom: !matched,
+						};
+					});
+				if (answers.length > 0) return { questions, answers, cancelled: false };
+			}
+
+			if (data && (data.closed || data.exit)) return null;
+		} catch (e) {
+			return null; // Server went away - fall back to the terminal UI.
+		}
+	}
+
+	return null;
+}
+
 function errorResult(
 	message: string,
 	questions: Question[] = [],
@@ -86,13 +190,10 @@ export default function questionnaire(pi: ExtensionAPI) {
 		name: "questionnaire",
 		label: "Questionnaire",
 		description:
-			"Ask the user one or more questions. Use for clarifying requirements, getting preferences, or confirming decisions. For single questions, shows a simple option list. For multiple questions, shows a tab-based interface.",
+			"Ask the user one or more questions. Use for clarifying requirements, getting preferences, or confirming decisions. If a Plan Previewer session is open, the questions are automatically routed into that browser tab (never the terminal) so the review context stays in one place; otherwise a terminal picker is shown.",
 		parameters: QuestionnaireParams,
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			if (ctx.mode !== "tui") {
-				return errorResult("Error: UI not available (running in non-interactive mode)");
-			}
 			if (params.questions.length === 0) {
 				return errorResult("Error: No questions provided");
 			}
@@ -103,6 +204,26 @@ export default function questionnaire(pi: ExtensionAPI) {
 				label: q.label || `Q${i + 1}`,
 				allowOther: q.allowOther !== false,
 			}));
+
+			// Prefer the open Plan Previewer tab over the terminal picker.
+			const session = await findLivePreviewerSession(process.cwd());
+			if (session) {
+				const viaPreviewer = await askInPreviewer(session, questions, _signal);
+				if (viaPreviewer) {
+					const lines = viaPreviewer.answers.map((a) => {
+						const qLabel = questions.find((q) => q.id === a.id)?.label || a.id;
+						return `${qLabel}: user answered in Plan Previewer: ${a.label}`;
+					});
+					return {
+						content: [{ type: "text", text: lines.join("\n") }],
+						details: viaPreviewer,
+					};
+				}
+			}
+
+			if (ctx.mode !== "tui") {
+				return errorResult("Error: UI not available (running in non-interactive mode)");
+			}
 
 			const isMulti = questions.length > 1;
 			const totalTabs = questions.length + 1; // questions + Submit

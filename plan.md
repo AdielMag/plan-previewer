@@ -1,127 +1,135 @@
 <!-- SUMMARY -->
-# Plan Previewer: Dual-View Architecture (Summary & Full)
+# Agent Questions: Move Them Into the Chat, Not the Plan (Executive Summary)
 
 > [!NOTE]
-> **Executive Summary**: Upgraded Plan Previewer so agents author two distinct text views: a **Summary View** (30-second executive scan with high-level strategy, decisions, and milestones) and a **Full View** (in-depth engineering specification with architecture diagrams, schema migrations, and code diffs).
+> **Executive Summary**: Round 1 shipped the in-tab Q&A channel (`--ask` → same tab → `answers[]` back to the CLI). But it renders questions as a panel *inside the plan document*, which reads like plan content. Round 2 moves them where they belong: an **agent chat bubble in the Activity sidebar**, plus a **footer takeover** that replaces the comment box with a CLI-style questionnaire (options + always-available free text). Effort: UI-only, no server/CLI/protocol changes.
 
----
+## What's wrong today
+
+| Now | Should be |
+|---|---|
+| Sticky `[!QUESTION]`-looking panel at the top of the plan body | Message from the agent in the Activity chat stream |
+| Answers typed inside the document flow | Footer comment box is **taken over** by the question UI |
+| Feels like plan content | Feels like the agent asking you something |
+
+## Core Concept
+
+- **Sidebar** = the record: *"<Agent> asked you 3 questions"* bubble, then your answers as a user bubble once sent.
+- **Footer** = the interaction: comment textarea is swapped for a question strip - `Question 2 of 3`, selectable options, an always-present **"Type your own answer"** field (same affordance the CLI questionnaire has), prev/next, and `Send answers`.
+- **Plan body** = untouched. The in-document ask panel is removed entirely.
 
 ## Key Decisions
 
-> [!CHOICE] Default Initial View
-> **Question**: Which view mode should Plan Previewer present first when opening a plan?
-> - (x) **Option A**: Summary View (Clean 30-second executive digest) [Recommended]
-> - ( ) **Option B**: Full View (Complete engineering specifications and code)
+> [!CHOICE] What happens to Approve / Request changes while questions are pending?
+> **Question**: The footer is taken over by the questionnaire. What do the normal buttons do?
+> - (x) **Option A**: Replaced by `Send answers` + a small `Answer later` link that restores the comment box (a pill in the sidebar reopens the questions) [Recommended]
+> - ( ) **Option B**: Stay visible but disabled until every question is answered
+> - ( ) **Option C**: Stay fully usable - answering is optional
 
-> [!CHOICE] Section Delimiter Syntax
-> **Question**: Which delimiter syntax feels most natural for agents writing dual-view markdown plans?
-> - (x) **Option A**: `<!-- SUMMARY -->` and `<!-- FULL -->` comments [Recommended]
-> - ( ) **Option B**: `<div data-view="summary">` and `<div data-view="full">` HTML tags
+> [!CHOICE] One question at a time, or all at once?
+> **Question**: How should multiple questions be laid out in the footer strip?
+> - (x) **Option A**: One at a time with `Q1 Q2 Q3` tabs + prev/next, exactly like the CLI questionnaire [Recommended]
+> - ( ) **Option B**: All questions stacked in a scrollable footer panel
 
-> [!QUESTION] Additional Section Suggestions
-> **Question**: Are there any additional specialized views or metadata you would like supported in future releases?
+> [!QUESTION] Keyboard shortcuts
+> **Question**: Want CLI-style keys (number keys pick an option, ↑↓ navigate, Enter next, Ctrl+Enter send)? Anything else you rely on?
 
----
+## Milestones
 
-## High-Level Milestones
-
-- [x] 1. Add `extractPlanViews()` parser to extract separate Summary and Full texts
-- [x] 2. Wire Header View Mode toggle (`Summary` vs `Full`) to switch active text document
-- [x] 3. Generate independent Outline (TOC) sidebar specifically for the active view
-- [x] 4. Update `rich-plan-formatting` and `plan-previewer` skills with dual-view guidelines
-- [x] 5. Verify all tests pass and live polling syncs across views
+- [x] 1. Remove the in-document ask panel
+- [x] 2. Agent question bubble at the **bottom** of the Activity stream (chronological)
+- [x] 3. Footer takeover questionnaire (options + always-available free text + tabs + keyboard)
+- [x] 4. Layout fixes: strip spans the full bar, centers on the doc column, no horizontal overflow
+- [x] 5. Verified live: 3 questions asked -> answered in-tab -> `answers[]` back to the CLI -> plan rewritten -> approved
 <!-- /SUMMARY -->
 
 <!-- FULL -->
-# Plan Previewer: Dual-View Architecture (Full Specification)
+# Agent Questions: Move Them Into the Chat, Not the Plan (Full Specification)
 
-## 1. Objective & Motivation
-Human reviewers need to scan plans in 30 seconds to understand the big picture and make architectural decisions without being overwhelmed by hundreds of lines of code diffs, database migrations, and edge-case specifications. At the same time, when executing or conducting deep technical reviews, the full engineering specification must be preserved in the exact same plan file.
+## 1. Context
 
-Instead of merely hiding DOM elements via CSS, Plan Previewer now supports **two distinct textual views** authored directly in the plan markdown file:
-1. `<!-- SUMMARY --> ... <!-- /SUMMARY -->`: The executive digest.
-2. `<!-- FULL --> ... <!-- /FULL -->`: The comprehensive engineering blueprint.
+Round 1 (already merged) added: `--ask` / `--ask-file` / `.plan-questions.json` on the CLI, `agentQuestions` rounds on the server, `answers[]` in `.plan-feedback.json`, post-approval keep-alive, and auto-redirect of the Pi `questionnaire` tool into the live tab. **All of that stays.** The only thing changing is *where and how the questions are presented in the browser*.
 
----
-
-## 2. System Architecture & Lifecycle
+## 2. UI Architecture
 
 ```mermaid
-graph TD
-    Agent[Agent Creates Plan] --> WriteDual[Writes Dual-View Markdown]
-    WriteDual --> Launch[Launch Plan Previewer]
-    Launch --> Extractor[extractPlanViews Parser]
-    Extractor -->|Summary Mode Active| RenderSummary[Render Summary Markdown + TOC]
-    Extractor -->|Full Mode Active| RenderFull[Render Full Markdown + TOC]
-    RenderSummary <-->|User Toggles View Mode| RenderFull
-    RenderSummary --> UserReview{User Reviews & Decides}
-    RenderFull --> UserReview
-    UserReview -->|Feedback Submitted| WriteFeedback[.plan-feedback.json Written]
+graph LR
+    A[agent --ask] --> B[server: agentQuestions round]
+    B --> C[poll /api/plan]
+    C --> D[Activity sidebar: agent bubble]
+    C --> E[Footer: questionnaire takeover]
+    E --> F[POST /api/feedback status=answered]
+    F --> D2[Sidebar: your answers bubble]
 ```
 
----
+### 2.1 Activity sidebar (the record)
 
-## 3. Decisions & Options
+New chat bubble rendered by `renderQuestionsSidebar()`, styled like the existing agent bubbles:
 
-> [!CHOICE] Default Initial View
-> **Question**: Which view mode should Plan Previewer present first when opening a plan?
-> - (x) **Option A**: Summary View (Clean 30-second executive digest) [Recommended]
-> - ( ) **Option B**: Full View (Complete engineering specifications and code)
-
-> [!CHOICE] Section Delimiter Syntax
-> **Question**: Which delimiter syntax feels most natural for agents writing dual-view markdown plans?
-> - (x) **Option A**: `<!-- SUMMARY -->` and `<!-- FULL -->` comments [Recommended]
-> - ( ) **Option B**: `<div data-view="summary">` and `<div data-view="full">` HTML tags
-
-> [!QUESTION] Additional Section Suggestions
-> **Question**: Are there any additional specialized views or metadata you would like supported in future releases?
-
----
-
-## 4. Technical Implementation Details
-
-```javascript
-// Parser logic in public/app.js
-function extractPlanViews(content) {
-  if (!content || typeof content !== 'string') {
-    return { hasDualViews: false, summaryContent: '', fullContent: content || '' };
-  }
-
-  const summaryMatch = content.match(/<!--\s*(?:SECTION:\s*)?SUMMARY(?:_START)?\s*-->([\s\S]*?)<!--\s*(?:\/|END\s+|END_)?(?:SECTION:\s*)?SUMMARY(?:_END)?\s*-->/i);
-  const fullMatch = content.match(/<!--\s*(?:SECTION:\s*)?FULL(?:_START)?\s*-->([\s\S]*?)<!--\s*(?:\/|END\s+|END_)?(?:SECTION:\s*)?FULL(?:_END)?\s*-->/i);
-
-  if (summaryMatch && fullMatch) {
-    return {
-      hasDualViews: true,
-      summaryContent: summaryMatch[1].trim(),
-      fullContent: fullMatch[1].trim()
-    };
-  }
-
-  return { hasDualViews: false, summaryContent: content, fullContent: content };
-}
+```
+┌──────────────────────────────────────┐
+│ ⬤ Claude Code   [Asked you]   14:32 │
+│ Needs your input on 3 things:        │
+│  1. Default theme          ● pending │
+│  2. Light mode scope       ✓ Follow… │
+│  3. What bothers you?      ● pending │
+│            [ Answer now → ]          │
+└──────────────────────────────────────┘
 ```
 
----
+- Clicking the bubble (or `Answer now`) focuses the footer strip at the first unanswered question.
+- After sending, it collapses to `Answered · 3/3` and a **user bubble** is appended with the given answers, followed by the usual "agent is working" typing indicator.
 
-## 5. File Changes
+### 2.2 Footer takeover (the interaction)
+
+While a round is pending, `.footer-input-row` is replaced (not merely augmented) by `.footer-ask-mode`:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Claude Code asks · [Q1] [Q2] [Q3]                 Answer later  │
+│ Default theme                                                    │
+│ What should a brand-new user get on first load?                  │
+│  (•) 1  Follow system preference   [Recommended]                 │
+│  ( ) 2  Always light                                             │
+│  ( ) 3  Always dark                                              │
+│  ( ) 4  Type your own answer…  [__________________________]      │
+│                                    [ ← Prev ] [ Next → ] [Send] │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+- **Free text is always available**, matching the CLI `allowOther` behaviour: a final `Type your own answer…` option that reveals an inline input. Pure `type: "text"` questions render just the input.
+- Tabs `Q1 Q2 Q3` show per-question state (empty / answered) and jump between questions.
+- `Send answers (n/m)` is enabled once at least one question is answered; unanswered ones are transmitted as skipped.
+- `Answer later` restores the normal comment box; the sidebar bubble keeps a `Resume` affordance so nothing is lost.
+
+### 2.3 Keyboard (CLI parity)
+
+| Key | Action |
+|---|---|
+| `1`-`9` | Select the nth option |
+| `↑` / `↓` | Move option focus |
+| `←` / `→` / `Tab` | Previous / next question |
+| `Enter` | Confirm option and advance |
+| `Ctrl`+`Enter` | Send answers |
+| `Esc` | Answer later (restore comment box) |
+
+## 3. File Changes Breakdown
 
 | File | Action | Description |
 |---|---|---|
-| `public/app.js` | `[MODIFY]` | Added `extractPlanViews()`, dynamic view re-rendering, and independent TOC generation |
-| `skills/rich-plan-formatting/SKILL.md` | `[MODIFY]` | Added dual-text structure protocol and examples |
-| `skills/plan-previewer/SKILL.md` | `[MODIFY]` | Documented dual-view authoring requirement in agent workflow |
-| `src/rule-block.js` | `[MODIFY]` | Updated global agent instructions to require dual-view structure |
-| `README.md` | `[MODIFY]` | Added dual-view documentation and delimiter specifications |
+| `public/index.html` | `[MODIFY]` | Delete `#agentAskPanel`; add `#footerAskMode` container inside the footer |
+| `public/app.js` | `[MODIFY]` | Replace `renderAgentAskPanel()` with `renderAskChatBubble()` + `renderFooterAskMode()`; add question cursor state, keyboard handler, `Answer later` / `Resume`; keep `collectAgentAnswers()` + `submitFeedback('answered')` as-is |
+| `public/styles.css` | `[MODIFY]` | Remove `.agent-ask-panel` block; add `.footer-ask-mode`, `.ask-tab`, `.ask-option-row`, `.ask-other-input`, `.bubble-ask` |
+| `README.md`, `skills/*`, `scripts/install-skills.js` | `[MODIFY]` | Update the one-line description of *where* questions appear (chat + footer, not the plan body) |
+| `tests/agent-questions.test.js` | `[KEEP]` | Server/CLI contract is unchanged, so the existing round-trip test still guards it |
 
----
+## 4. Non-Goals
 
-## 6. Verification & Automated Test Suite
+- No change to `--ask` syntax, `/api/notify`, `/api/feedback`, or `.plan-feedback.json`.
+- No change to the `[!CHOICE]` / `[!QUESTION]` blocks that live *inside* plan markdown - those are plan content and correctly stay in the document.
 
-- Run test suite: `npm test`
-- Verification checkpoints:
-  - Switching between Summary and Full modes re-renders the appropriate text section.
-  - Outline (TOC) sidebar dynamically updates to show headings from the active view.
-  - Selections in Decisions Tray persist across view switches.
-  - Single-view plans (without delimiter tags) gracefully render across both view modes.
+## 5. Verification
+
+- `npm test` (unchanged suite must stay green).
+- Manual: with a session open, run `--ask` in a second shell → question appears as a chat bubble + footer takeover in the same tab, answer with a picked option and a typed one → `.plan-feedback.json` shows `status: "answered"` with both.
 <!-- /FULL -->

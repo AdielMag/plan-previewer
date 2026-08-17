@@ -10,6 +10,11 @@ let state = {
   questions: [],
   feedbackHistory: [],
   agentResponses: [],
+  agentQuestions: [],   // rounds pushed by the agent via `--ask`
+  askAnswers: {},       // { "<roundId>:<questionId>": { value } }
+  askCursor: 0,         // which pending question the footer strip is showing
+  askDeferred: false,   // user chose "Answer later"
+  planApproved: false,
   selections: {}, // { [choiceTitle]: { selectedText, cleanTitle, isRecommended } }
   draftAnswers: {}, // { [questionTitle]: answerText }
   nextQuestionId: 1,
@@ -422,10 +427,30 @@ function startFilePolling() {
             planData.agentResponses &&
             planData.agentResponses.length > (state.agentResponses ? state.agentResponses.length : 0)
           );
+          const prevAskCount = (state.agentQuestions || []).reduce((s, r) => s + r.questions.length, 0);
+          const nextQuestions = planData.agentQuestions || state.agentQuestions || [];
+          const nextAskCount = nextQuestions.reduce((s, r) => s + r.questions.length, 0);
+          const hasNewAgentQuestions = nextAskCount > prevAskCount;
+
           state.agentResponses = planData.agentResponses || state.agentResponses;
+          state.planApproved = Boolean(planData.planApproved);
+
+          if (hasNewAgentQuestions) {
+            // Preserve local 'answered' marks for rounds already submitted.
+            const answeredIds = new Set(
+              (state.agentQuestions || []).filter((r) => r.status === 'answered').map((r) => r.roundId)
+            );
+            state.agentQuestions = nextQuestions.map((r) =>
+              answeredIds.has(r.roundId) ? { ...r, status: 'answered' } : r
+            );
+            renderAgentAskPanel();
+            renderQuestionsSidebar();
+            updateSubmitButtonsEnabled();
+            showAgentUpdateToast(`${state.callerAgent.name} asked you a question \u2014 answer it below`);
+          }
 
           // Only address pending requests when the agent actually updated content or sent a response
-          if (contentChanged || hasNewAgentResponse) {
+          if (contentChanged || hasNewAgentResponse || hasNewAgentQuestions) {
             const diffSummary = contentChanged ? summarizeDiff(state.content, planData.content) : null;
             const latestResponse = (state.agentResponses && state.agentResponses.length)
               ? state.agentResponses[state.agentResponses.length - 1].text
@@ -465,6 +490,13 @@ function updateActionButtonsState() {
   const requestBtn = document.getElementById('btnRequestChanges');
   if (!requestBtn) return;
 
+  // Hidden while the agent's questions are pending - nothing to update.
+  if (hasPendingAsks()) {
+    requestBtn.style.display = 'none';
+    return;
+  }
+  requestBtn.style.display = '';
+
   if (!state.serverAlive) {
     requestBtn.disabled = true;
     requestBtn.classList.add('btn-disabled');
@@ -498,6 +530,15 @@ function updateSubmitButtonsEnabled() {
   if (!requestBtn || !approveBtn) return;
 
   const waiting = isWaitingForAgent();
+
+  updateSendAnswersButton();
+
+  // While the agent is waiting on answers, "Send answers" is the ONLY action:
+  // Request changes / Approve are hidden entirely, not just disabled.
+  const askPending = hasPendingAsks();
+  requestBtn.style.display = askPending ? 'none' : '';
+  approveBtn.style.display = askPending ? 'none' : '';
+  if (askPending) return;
 
   if (!state.serverAlive) {
     approveBtn.disabled = true;
@@ -540,6 +581,8 @@ async function fetchPlanData() {
       state.callerAgent = data.callerAgent || state.callerAgent;
       state.sessionContext = data.sessionContext || extractPlanGoal(data.content);
       state.agentResponses = data.agentResponses || [];
+      state.agentQuestions = data.agentQuestions || [];
+      state.planApproved = Boolean(data.planApproved);
 
       // Mark previous pending feedback items as addressed
       state.feedbackHistory.forEach((item) => {
@@ -564,6 +607,7 @@ async function fetchPlanData() {
 
       updateHeader();
       renderMarkdown();
+      renderAgentAskPanel();
       renderQuestionsSidebar();
     }
   } catch (err) {
@@ -1662,6 +1706,8 @@ function setupEventListeners() {
     submitFeedback('approved');
   });
 
+  document.addEventListener('keydown', handleAskKeydown);
+
   // Notify server when tab is closed or navigated away
   window.addEventListener('pagehide', () => {
     try {
@@ -1745,6 +1791,306 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
+/* ------------------------------------------------------------------ *
+ * Agent Questions ("asks") - the agent pushes questions into THIS tab
+ * instead of asking in the CLI, and the user answers them right here.
+ * ------------------------------------------------------------------ */
+
+function pendingAskRounds() {
+  return (state.agentQuestions || []).filter((r) => r.status !== 'answered');
+}
+
+function hasPendingAsks() {
+  return pendingAskRounds().length > 0;
+}
+
+function askKey(roundId, questionId) {
+  return `${roundId}:${questionId}`;
+}
+
+function flattenPendingAsks() {
+  const items = [];
+  pendingAskRounds().forEach((round) => {
+    round.questions.forEach((q) => {
+      items.push({ roundId: round.roundId, key: askKey(round.roundId, q.id), q });
+    });
+  });
+  return items;
+}
+
+function answeredAskCount() {
+  return flattenPendingAsks().filter((it) => {
+    const a = state.askAnswers[it.key];
+    return a && a.value;
+  }).length;
+}
+
+/**
+ * Footer takeover: while the agent waits on answers, the comment box is
+ * replaced by a CLI-style questionnaire strip. Every question - including
+ * multiple-choice ones - always offers a free-text answer.
+ */
+function renderAskFooter() {
+  const strip = document.getElementById('footerAskMode');
+  const inputRow = document.getElementById('footerInputRow');
+  const bar = document.querySelector('.footer-bar');
+  if (!strip || !inputRow) return;
+
+  const items = flattenPendingAsks();
+
+  if (items.length === 0 || state.askDeferred) {
+    strip.style.display = 'none';
+    strip.innerHTML = '';
+    inputRow.style.display = '';
+    if (bar) bar.classList.remove('footer-ask-active');
+    return;
+  }
+
+  if (bar) bar.classList.add('footer-ask-active');
+
+  if (state.askCursor >= items.length) state.askCursor = items.length - 1;
+  if (state.askCursor < 0) state.askCursor = 0;
+
+  const item = items[state.askCursor];
+  const q = item.q;
+  const entry = state.askAnswers[item.key] || {};
+  const agentName = state.callerAgent.name || 'Agent';
+  const agentStyle = getAgentAvatarStyle(state.callerAgent);
+  const agentSymbol = getAgentAvatarSymbol(state.callerAgent);
+  const isChoice = q.type === 'choice' && q.options && q.options.length > 0;
+  const optionLabels = isChoice ? q.options.map((o) => o.label) : [];
+  const isCustom = Boolean(entry.value) && !optionLabels.includes(entry.value);
+
+  let html = `
+    <div class="ask-strip-header">
+      <div class="agent-avatar-sm" style="${agentStyle}">${agentSymbol}</div>
+      <span class="ask-strip-who">${escapeHtml(agentName)} asks</span>
+      <div class="ask-strip-tabs">`;
+
+  items.forEach((it, i) => {
+    const done = state.askAnswers[it.key] && state.askAnswers[it.key].value;
+    html += `<button type="button" class="ask-tab${i === state.askCursor ? ' ask-tab-active' : ''}${done ? ' ask-tab-done' : ''}"
+      onclick="gotoAsk(${i})" title="${escapeHtml(it.q.title || '')}">Q${i + 1}</button>`;
+  });
+
+  html += `
+      </div>
+      <span class="ask-strip-count">${answeredAskCount()}/${items.length} answered</span>
+      <button type="button" class="ask-strip-later" onclick="deferAsks()" title="Hide the questions and restore the comment box (Esc)">Answer later</button>
+    </div>
+    <div class="ask-strip-body">
+      <div class="ask-strip-title">${escapeHtml(q.title || 'Question')}</div>
+      <div class="ask-strip-question">${escapeHtml(q.question || '')}</div>`;
+
+  if (isChoice) {
+    html += '<div class="ask-strip-options">';
+    q.options.forEach((opt, i) => {
+      const selected = entry.value === opt.label;
+      html += `
+        <button type="button" class="ask-option-row${selected ? ' ask-option-row-selected' : ''}" onclick="pickAskOption(${i})">
+          <span class="ask-option-key">${i + 1}</span>
+          <span class="ask-option-main">
+            <span class="ask-option-label">${escapeHtml(opt.label)}${opt.recommended ? '<span class="ask-option-rec">Recommended</span>' : ''}</span>
+            ${opt.description ? `<span class="ask-option-desc">${escapeHtml(opt.description)}</span>` : ''}
+          </span>
+        </button>`;
+    });
+
+    html += `
+      <div class="ask-option-row ask-option-other${isCustom ? ' ask-option-row-selected' : ''}">
+        <span class="ask-option-key">${q.options.length + 1}</span>
+        <input type="text" class="ask-other-input" id="askOtherInput" placeholder="Or write your own answer\u2026"
+          value="${isCustom ? escapeHtml(entry.value) : ''}" oninput="setAskAnswer('${escapeHtml(item.key)}', this.value)">
+      </div>
+    </div>`;
+  } else {
+    html += `
+      <textarea class="ask-strip-textarea" id="askTextInput" rows="2" placeholder="Type your answer for the agent\u2026"
+        oninput="setAskAnswer('${escapeHtml(item.key)}', this.value)">${escapeHtml(entry.value || '')}</textarea>`;
+  }
+
+  const sendEnabled = state.serverAlive && answeredAskCount() > 0;
+
+  html += `
+    </div>
+    <div class="ask-strip-actions">
+      <span class="ask-strip-hint">1-9 pick \u00b7 type to write your own \u00b7 \u2190 \u2192 switch question \u00b7 Ctrl+Enter send</span>
+      <button type="button" class="ask-nav-btn" onclick="stepAsk(-1)" ${state.askCursor === 0 ? 'disabled' : ''}>\u2190 Prev</button>
+      <button type="button" class="ask-nav-btn" onclick="stepAsk(1)" ${state.askCursor >= items.length - 1 ? 'disabled' : ''}>Next \u2192</button>
+      <button type="button" class="footer-btn btn-answers${sendEnabled ? '' : ' btn-disabled'}" id="btnAskSend" ${sendEnabled ? '' : 'disabled'} onclick="sendAskAnswers()">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        <span>Send answers (${answeredAskCount()}/${items.length})</span>
+      </button>
+    </div>`;
+
+  strip.innerHTML = html;
+  strip.style.display = 'block';
+  inputRow.style.display = 'none';
+}
+
+/** Single entry point used by the polling / fetch paths. */
+function renderAgentAskPanel() {
+  renderAskFooter();
+}
+
+window.gotoAsk = function (index) {
+  state.askCursor = index;
+  renderAskFooter();
+};
+
+window.stepAsk = function (delta) {
+  state.askCursor += delta;
+  renderAskFooter();
+};
+
+window.deferAsks = function () {
+  state.askDeferred = true;
+  renderAskFooter();
+  renderQuestionsSidebar();
+  updateSubmitButtonsEnabled();
+};
+
+window.resumeAsks = function () {
+  state.askDeferred = false;
+  const items = flattenPendingAsks();
+  const firstUnanswered = items.findIndex((it) => !(state.askAnswers[it.key] && state.askAnswers[it.key].value));
+  state.askCursor = firstUnanswered === -1 ? 0 : firstUnanswered;
+  renderAskFooter();
+  renderQuestionsSidebar();
+  updateSubmitButtonsEnabled();
+};
+
+window.pickAskOption = function (optionIndex) {
+  const items = flattenPendingAsks();
+  const item = items[state.askCursor];
+  if (!item) return;
+  const opt = item.q.options[optionIndex];
+  if (!opt) return;
+  const current = state.askAnswers[item.key];
+  if (current && current.value === opt.label) {
+    delete state.askAnswers[item.key];
+  } else {
+    state.askAnswers[item.key] = { value: opt.label };
+  }
+  // Auto-advance to the next question, like the CLI questionnaire does.
+  if (state.askAnswers[item.key] && state.askCursor < items.length - 1) state.askCursor += 1;
+  renderAskFooter();
+  renderQuestionsSidebar();
+};
+
+window.setAskAnswer = function (key, value) {
+  const val = (value || '').trim();
+  if (!val) delete state.askAnswers[key];
+  else state.askAnswers[key] = { value: val };
+
+  // Update counters in place so typing never steals focus from the input.
+  const items = flattenPendingAsks();
+  const sendBtn = document.getElementById('btnAskSend');
+  if (sendBtn) {
+    const label = sendBtn.querySelector('span');
+    if (label) label.textContent = `Send answers (${answeredAskCount()}/${items.length})`;
+    const enabled = state.serverAlive && answeredAskCount() > 0;
+    sendBtn.disabled = !enabled;
+    sendBtn.classList.toggle('btn-disabled', !enabled);
+  }
+  const countEl = document.querySelector('.ask-strip-count');
+  if (countEl) countEl.textContent = `${answeredAskCount()}/${items.length} answered`;
+  const activeTab = document.querySelector('.ask-tab-active');
+  if (activeTab) activeTab.classList.toggle('ask-tab-done', Boolean(val));
+  const otherRow = document.querySelector('.ask-option-other');
+  if (otherRow) otherRow.classList.toggle('ask-option-row-selected', Boolean(val));
+  document.querySelectorAll('.ask-option-row-selected').forEach((el) => {
+    if (!el.classList.contains('ask-option-other')) el.classList.remove('ask-option-row-selected');
+  });
+  renderQuestionsSidebar();
+};
+
+window.sendAskAnswers = function () {
+  if (!state.serverAlive || answeredAskCount() === 0) return;
+  submitFeedback('answered');
+};
+
+function collectAgentAnswers() {
+  return flattenPendingAsks().map(({ roundId, key, q }) => {
+    const entry = state.askAnswers[key];
+    const value = entry ? entry.value : '';
+    return {
+      roundId,
+      id: q.id,
+      type: q.type,
+      title: q.title,
+      question: q.question,
+      ...(q.type === 'choice' ? { selected: value } : { answer: value }),
+    };
+  });
+}
+
+function updateSendAnswersButton() {
+  // The send button lives inside the footer strip and is rendered with it.
+  renderAskFooter();
+}
+
+function markAsksAnswered(answers) {
+  const roundIds = new Set(answers.map((a) => a.roundId));
+  (state.agentQuestions || []).forEach((round) => {
+    if (roundIds.has(round.roundId)) round.status = 'answered';
+  });
+  answers.forEach((a) => delete state.askAnswers[askKey(a.roundId, a.id)]);
+  state.askDeferred = false;
+  state.askCursor = 0;
+  renderAskFooter();
+}
+
+/** CLI-parity keyboard control for the footer questionnaire. */
+function handleAskKeydown(e) {
+  if (!hasPendingAsks() || state.askDeferred) return;
+
+  const strip = document.getElementById('footerAskMode');
+  if (!strip || strip.style.display === 'none') return;
+
+  const items = flattenPendingAsks();
+  const item = items[state.askCursor];
+  if (!item) return;
+
+  const typing = document.activeElement && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName);
+
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    window.sendAskAnswers();
+    return;
+  }
+
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    window.deferAsks();
+    return;
+  }
+
+  if (typing) return;
+
+  if (/^[1-9]$/.test(e.key) && item.q.type === 'choice') {
+    const idx = parseInt(e.key, 10) - 1;
+    const optionCount = (item.q.options || []).length;
+    if (idx < optionCount) {
+      e.preventDefault();
+      window.pickAskOption(idx);
+    } else if (idx === optionCount) {
+      e.preventDefault();
+      const input = document.getElementById('askOtherInput');
+      if (input) input.focus();
+    }
+    return;
+  }
+
+  if (e.key === 'ArrowRight') {
+    e.preventDefault();
+    window.stepAsk(1);
+  } else if (e.key === 'ArrowLeft') {
+    e.preventDefault();
+    window.stepAsk(-1);
+  }
+}
+
 function renderQuestionsSidebar() {
   const list = document.getElementById('questionsList');
   const badge = document.getElementById('sidebarBadge');
@@ -1753,7 +2099,8 @@ function renderQuestionsSidebar() {
   const draftAnswerKeys = Object.keys(state.draftAnswers);
   const totalDraftCount = selectionKeys.length + draftAnswerKeys.length + state.questions.length;
   const totalHistoryCount = state.feedbackHistory.length;
-  const totalItems = totalDraftCount + totalHistoryCount;
+  const pendingAskCount = pendingAskRounds().reduce((sum, r) => sum + r.questions.length, 0);
+  const totalItems = totalDraftCount + totalHistoryCount + pendingAskCount;
 
   badge.textContent = totalItems;
 
@@ -1899,8 +2246,66 @@ function renderQuestionsSidebar() {
     html += '</div>';
   }
 
+  // 3. The agent's pending questions belong at the BOTTOM of the stream -
+  // they are the newest message in the conversation.
+  if (pendingAskCount > 0) {
+    const agentName = state.callerAgent.name || 'Agent';
+    const agentStyle = getAgentAvatarStyle(state.callerAgent);
+    const agentSymbol = getAgentAvatarSymbol(state.callerAgent);
+    const items = flattenPendingAsks();
+    const answered = answeredAskCount();
+
+    html += `
+      <div class="chat-stream chat-stream-tail">
+        <div class="chat-bubble bubble-agent bubble-ask" onclick="resumeAsks()">
+          <div class="bubble-header">
+            <div class="agent-avatar-sm" style="${agentStyle}">${agentSymbol}</div>
+            <span class="bubble-sender">${escapeHtml(agentName)}</span>
+            <span class="bubble-tag bubble-tag-ask">Asked you</span>
+            <span class="bubble-time">${answered}/${items.length}</span>
+          </div>
+          <div class="bubble-body-text">Needs your input on ${items.length} thing${items.length === 1 ? '' : 's'}:</div>
+          <div class="ask-bubble-list">`;
+
+    items.forEach((it, i) => {
+      const entry = state.askAnswers[it.key];
+      const value = entry && entry.value ? entry.value : '';
+      html += `
+            <div class="ask-bubble-item${value ? ' ask-bubble-item-done' : ''}" onclick="event.stopPropagation(); gotoAskFromSidebar(${i})">
+              <span class="ask-bubble-index">${i + 1}</span>
+              <span class="ask-bubble-text">
+                <span class="ask-bubble-title">${escapeHtml(it.q.title || 'Question')}</span>
+                <span class="ask-bubble-answer">${value ? escapeHtml(value) : 'Awaiting your answer'}</span>
+              </span>
+            </div>`;
+    });
+
+    html += `
+          </div>
+          <button type="button" class="ask-bubble-cta" onclick="event.stopPropagation(); resumeAsks()">Answer now →</button>
+        </div>
+      </div>`;
+  }
+
   list.innerHTML = html;
+
+  // Keep the newest message visible, like a real chat.
+  list.scrollTop = list.scrollHeight;
 }
+
+window.gotoAskFromSidebar = function (index) {
+  state.askDeferred = false;
+  state.askCursor = index;
+  renderAskFooter();
+  updateSubmitButtonsEnabled();
+  const strip = document.getElementById('footerAskMode');
+  if (strip) {
+    strip.classList.remove('highlight-flash');
+    void strip.offsetWidth;
+    strip.classList.add('highlight-flash');
+    setTimeout(() => strip.classList.remove('highlight-flash'), 1200);
+  }
+};
 
 function scrollToNote(id) {
   const root = document.getElementById('renderedOutput');
@@ -1981,6 +2386,27 @@ async function submitFeedback(status) {
   const commentInput = document.getElementById('footerComment');
   const comment = commentInput ? commentInput.value.trim() : '';
   const choices = collectChoicesAndAnswers();
+  const answers = collectAgentAnswers();
+
+  if (status === 'answered') {
+    const answered = answers.filter((a) => a.selected || a.answer);
+    if (answered.length === 0) return;
+
+    state.feedbackHistory.push({
+      id: Date.now(),
+      type: 'answers',
+      text:
+        (comment ? `${comment}\n\n` : '') +
+        answered.map((a) => `${a.title || a.question}: ${a.selected || a.answer}`).join('\n'),
+      status: 'pending',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    });
+
+    markAsksAnswered(answers);
+    if (commentInput) commentInput.value = '';
+    renderQuestionsSidebar();
+    updateSubmitButtonsEnabled();
+  }
 
   if (status === 'changes_requested') {
     if (comment || choices.length > 0) {
@@ -2007,6 +2433,7 @@ async function submitFeedback(status) {
     comment,
     questions: state.questions.map(q => ({ section: q.quote, text: q.text })),
     choices,
+    answers,
     content: state.content
   };
 
@@ -2024,13 +2451,22 @@ async function submitFeedback(status) {
       }
 
       if (status === 'approved') {
+        // The session intentionally stays open after approval, so the agent can
+        // ask execution-phase questions in THIS tab instead of a new one.
+        state.planApproved = true;
+        state.status = 'approved';
+        updateStatusPill('approved');
         document.getElementById('modalTitle').textContent = 'Plan Approved!';
-        document.getElementById('modalMessage').textContent = `Feedback transmitted back to ${state.callerAgent.name}. Closing tab...`;
+        document.getElementById('modalMessage').textContent =
+          `Approval sent to ${state.callerAgent.name}. Keep this tab open \u2014 the agent will post progress and any questions right here.`;
         document.getElementById('successModal').classList.add('active');
 
         setTimeout(() => {
-          closeTab();
-        }, 1200);
+          const modal = document.getElementById('successModal');
+          if (modal) modal.classList.remove('active');
+        }, 3000);
+      } else if (status === 'answered') {
+        showAgentUpdateToast('Answers sent to agent!');
       } else {
         showAgentUpdateToast('Requested changes sent to agent! Waiting for response…');
       }

@@ -6,3 +6,8 @@ node_modules/
 *.log
 
 scratch/
+
+# Agent question hand-off files (single-use, consumed by the CLI)
+.plan-questions.json
+.plan-questions.md
+.plan-response.md
